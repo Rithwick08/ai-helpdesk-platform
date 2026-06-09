@@ -1,0 +1,13 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Environment Variables
+backend/.env
+
+# Node
+node_modules/
+
+# Mac
+.DS_Store
