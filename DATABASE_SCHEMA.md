@@ -13,8 +13,10 @@
 
 ## Planned Tables
 
-- incidents
-- alerts
-- tickets
-- training_records
-- password_requests
+users
+incidents
+tickets
+alerts
+training_records
+password_requests
+audit_logs

@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes.user import router as user_router
+from routes.incident import router as incident_router
+from routes.alert import router as alert_router
 
 app = FastAPI()
 
@@ -12,7 +14,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(alert_router)
 app.include_router(user_router)
+app.include_router(incident_router)
 
 @app.get("/")
 def home():
