@@ -85,3 +85,39 @@ Rules:
         result = result.replace("```json", "").replace("```", "").strip()
 
     return json.loads(result)
+def analyze_password_reset(reason):
+
+    response = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[
+            {
+                "role": "user",
+                "content": f"""
+Analyze this password reset request.
+
+Reason:
+{reason}
+
+Return ONLY valid JSON.
+
+{{
+    "priority": "",
+    "action": ""
+}}
+
+Rules:
+- priority must be Low, Medium, or High
+- no explanations
+"""
+            }
+        ]
+    )
+
+    import json
+
+    result = response.choices[0].message.content.strip()
+
+    if result.startswith("```json"):
+        result = result.replace("```json", "").replace("```", "").strip()
+
+    return json.loads(result)

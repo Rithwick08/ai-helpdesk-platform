@@ -1,7 +1,9 @@
+# recreate_password_resets.py
+
 from database import engine
-from models.action import Action
+from models.password_reset import PasswordReset
 
-Action.__table__.drop(engine, checkfirst=True)
-Action.__table__.create(engine)
+PasswordReset.__table__.drop(engine, checkfirst=True)
+PasswordReset.__table__.create(engine)
 
-print("Actions table recreated")
+print("Password resets table recreated")

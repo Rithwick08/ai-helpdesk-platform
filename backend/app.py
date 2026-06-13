@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routes.user import router as user_router
 from routes.incident import router as incident_router
 from routes.alert import router as alert_router
+from routes.password_reset import router as password_reset_router
 
 app = FastAPI()
 
@@ -17,6 +18,7 @@ app.add_middleware(
 app.include_router(alert_router)
 app.include_router(user_router)
 app.include_router(incident_router)
+app.include_router(password_reset_router)
 
 @app.get("/")
 def home():
