@@ -121,3 +121,64 @@ Rules:
         result = result.replace("```json", "").replace("```", "").strip()
 
     return json.loads(result)
+def diagnose_it_issue(issue):
+
+    response = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[
+            {
+                "role": "user",
+                "content": f"""
+Analyze this IT support issue.
+
+Issue:
+{issue}
+
+Return ONLY valid JSON.
+
+{{
+   
+    "category": "",
+    "priority": "",
+    "diagnosis": "",
+    "recommended_fix": "",
+    "resolution_steps": ""
+
+}}
+
+Provide 3-5 numbered resolution steps..
+resolution_steps must be a single string.
+
+Example:
+
+"1. Verify credentials
+2. Reset password
+3. Restart VPN client
+4. Retry connection"
+
+Do NOT return arrays or objects.
+"""
+            }
+        ]
+    )
+
+    import json
+
+    result = response.choices[0].message.content.strip()
+
+    if result.startswith("```json"):
+        result = result.replace("```json", "").replace("```", "").strip()
+    try:
+        return json.loads(result)
+
+    except Exception as e:
+        print("AI JSON Parse Error:", e)
+        print(result)
+
+    return {
+        "category": "Unknown",
+        "priority": "Low",
+        "diagnosis": "Unable to analyze issue",
+        "recommended_fix": "Manual review required",
+        "resolution_steps": "Escalate to IT support"
+    }

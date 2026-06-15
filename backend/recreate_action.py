@@ -1,9 +1,7 @@
-# recreate_password_resets.py
-
 from database import engine
-from models.password_reset import PasswordReset
+from models.it_ticket import ITTicket
 
-PasswordReset.__table__.drop(engine, checkfirst=True)
-PasswordReset.__table__.create(engine)
+ITTicket.__table__.drop(engine, checkfirst=True)
+ITTicket.__table__.create(engine)
 
-print("Password resets table recreated")
+print("IT tickets table recreated")
