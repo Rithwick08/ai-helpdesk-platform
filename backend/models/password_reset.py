@@ -17,3 +17,4 @@ class PasswordReset(Base):
     status = Column(String, default="Pending")
 
     created_at = Column(DateTime, default=datetime.utcnow)
+    account_type = Column(String)

@@ -10,18 +10,37 @@ from schemas.it_ticket import (
 )
 from services.ai_service import diagnose_it_issue
 
-router = APIRouter()
+from fastapi import APIRouter, Depends
+from auth.dependencies import get_current_user
+from models.user import User
+from auth.dependencies import require_roles
+
+router = APIRouter(
+    tags=["IT Support"],
+    dependencies=[
+        Depends(require_roles(["admin", "it_support"]))
+    ]
+)
 
 @router.get("/it-tickets")
 def get_it_tickets(
     db: Session = Depends(get_db)
 ):
-    return db.query(ITTicket).all()
+    tickets = db.query(ITTicket).all()
 
+    print(tickets)
+
+    return tickets
 @router.post("/it-tickets")
+
 def create_it_ticket(
+
     ticket: ITTicketCreate,
+
+    current_user: User = Depends(get_current_user),
+
     db: Session = Depends(get_db)
+
 ):
     analysis = diagnose_it_issue(
         ticket.description
@@ -31,30 +50,28 @@ def create_it_ticket(
         analysis["resolution_steps"]
     )
     new_ticket = ITTicket(
+    title=ticket.title,
+    description=ticket.description,
 
-        title=ticket.title,
+    category=analysis["category"],
+    priority=analysis["priority"],
 
-        description=ticket.description,
+    diagnosis=analysis["diagnosis"],
+    recommended_fix=analysis["recommended_fix"],
+    resolution_steps=resolution_steps,
 
-        category=analysis["category"],
+    status="Open",
 
-        priority=analysis["priority"],
-
-        diagnosis=analysis["diagnosis"],
-        recommended_fix=analysis["recommended_fix"],
-
-        resolution_steps=resolution_steps,
-
-        status="In Progress"
-
+    created_by=current_user.id,
+    assigned_to=None
     )
     db.add(new_ticket)
     db.commit()
     db.refresh(new_ticket)
     history = TicketHistory(
     ticket_id=new_ticket.id,
-    action="Ticket Created"
-)
+    action=f"Ticket created by {current_user.name}"
+    )
 
     db.add(history)
     db.commit()

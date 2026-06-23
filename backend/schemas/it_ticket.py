@@ -6,3 +6,6 @@ class ITTicketCreate(BaseModel):
 class TicketFeedback(BaseModel):
 
     resolved: bool
+class ITTicketCreate(BaseModel):
+    title: str
+    description: str

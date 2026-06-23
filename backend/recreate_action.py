@@ -1,7 +1,11 @@
 from database import engine
-from models.it_ticket import ITTicket
 
-ITTicket.__table__.drop(engine, checkfirst=True)
-ITTicket.__table__.create(engine)
+from models.user import User
+from models.training_recommendation import TrainingRecommendation
 
-print("IT tickets table recreated")
+TrainingRecommendation.__table__.create(
+    engine,
+    checkfirst=True
+)
+
+print("TrainingRecommendation table created.")

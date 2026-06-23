@@ -7,20 +7,33 @@ from models.incident import Incident
 from models.action import Action
 from schemas.alert import AlertCreate
 from services.ai_service import analyze_alert
+from auth.dependencies import require_roles
+from models.user import User
 
-router = APIRouter()
+from fastapi import APIRouter, Depends
 
+from auth.dependencies import require_roles
+
+router = APIRouter(
+    tags=["SOC Alerts"],
+    dependencies=[
+        Depends(require_roles(["admin", "soc_analyst"]))
+    ]
+)
 
 @router.get("/alerts")
-def get_alerts(db: Session = Depends(get_db)):
+def get_alerts(
+    db: Session = Depends(get_db)
+):
+    ...
     return db.query(Alert).all()
-
 
 @router.post("/alerts")
 def create_alert(
     alert: AlertCreate,
     db: Session = Depends(get_db)
 ):
+    ...
     analysis = analyze_alert(
         alert.alert_data
     )
@@ -90,8 +103,12 @@ def create_alert(
     }
 
 
-@router.get("/actions")
-def get_actions(db: Session = Depends(get_db)):
+@router.post("/alerts")
+def create_alert(
+    alert: AlertCreate,
+    db: Session = Depends(get_db)
+):
+    ...
     return db.query(Action).all()
 @router.get("/actions/{incident_id}")
 def get_actions_by_incident(

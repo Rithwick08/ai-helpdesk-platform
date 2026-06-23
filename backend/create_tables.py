@@ -6,6 +6,8 @@ from models.action import Action
 from models.password_reset import PasswordReset
 from models.it_ticket import ITTicket
 from models.ticket_history import TicketHistory
+from models.assistant_conversation import AssistantConversation
+from models.assistant_message import AssistantMessage
 
 Base.metadata.create_all(bind=engine)
 

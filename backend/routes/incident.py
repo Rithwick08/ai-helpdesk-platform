@@ -5,16 +5,33 @@ from database import get_db
 from models.incident import Incident
 from schemas.incident import IncidentCreate, IncidentStatusUpdate
 from services.ai_service import classify_incident
+from auth.dependencies import require_roles
+from models.user import User
 
-router = APIRouter()
+from fastapi import APIRouter, Depends
 
+
+router = APIRouter(
+    tags=["SOC Alerts"],
+    dependencies=[
+        Depends(require_roles(["admin", "soc_analyst"]))
+    ]
+)
 @router.get("/incidents")
-def get_incidents(db: Session = Depends(get_db)):
+def get_incidents(
+    current_user: User = Depends(
+        require_roles(["admin", "soc_analyst"])
+    ),
+    db: Session = Depends(get_db)
+):
     return db.query(Incident).all()
 
 @router.post("/incidents")
-def create_incident(
-    incident: IncidentCreate,
+@router.get("/incidents")
+def get_incidents(
+    current_user: User = Depends(
+        require_roles(["admin", "soc_analyst"])
+    ),
     db: Session = Depends(get_db)
 ):
     analysis = classify_incident(
