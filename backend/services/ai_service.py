@@ -465,3 +465,33 @@ Conversation:
         result = result.replace("```json", "").replace("```", "").strip()
 
     return json.loads(result)
+def answer_training_question(video_title, user_question):
+
+    response = client.chat(
+        model=CHAT_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": f"""
+You are a cybersecurity trainer.
+
+The user is watching this training video:
+
+{video_title}
+
+Answer only questions related to this topic.
+
+Keep answers concise and educational.
+"""
+            },
+            {
+                "role": "user",
+                "content": user_question
+            }
+        ],
+        temperature=0.3
+    )
+
+    return {
+        "answer": response.choices[0].message.content
+    }

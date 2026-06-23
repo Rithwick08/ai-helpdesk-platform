@@ -1,84 +1,11 @@
 import { useState, useEffect } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
-const navItems = [
-  {
-    id: 'dashboard',
-    label: 'Dashboard',
-    path: '/dashboard',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-        <rect x="3" y="3" width="7" height="7" rx="1" />
-        <rect x="14" y="3" width="7" height="7" rx="1" />
-        <rect x="3" y="14" width="7" height="7" rx="1" />
-        <rect x="14" y="14" width="7" height="7" rx="1" />
-      </svg>
-    ),
-  },
-  {
-    id: 'incidents',
-    label: 'Incident Response',
-    path: '/incidents',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-        <line x1="12" y1="9" x2="12" y2="13" />
-        <line x1="12" y1="17" x2="12.01" y2="17" />
-      </svg>
-    ),
-    badge: 14,
-  },
-  {
-    id: 'soc',
-    label: 'SOC Assistant',
-    path: '/soc',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 8v4l3 3" />
-      </svg>
-    ),
-  },
-  {
-    id: 'it-support',
-    label: 'IT Support',
-    path: '/it-support',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-        <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
-        <polyline points="7.5 4.21 12 6.81 16.5 4.21" />
-        <polyline points="7.5 19.79 7.5 14.6 3 12" />
-        <polyline points="21 12 16.5 14.6 16.5 19.79" />
-        <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-        <line x1="12" y1="22.08" x2="12" y2="12" />
-      </svg>
-    ),
-  },
-  {
-    id: 'password-reset',
-    label: 'Password Reset',
-    path: '/password-reset',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-        <path d="M7 11V7a5 5 0 0110 0v4" />
-      </svg>
-    ),
-  },
-  {
-    id: 'security-awareness',
-    label: 'Security Training',
-    path: '/security-awareness',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      </svg>
-    ),
-  },
-]
-
-export default function Sidebar({ isOpen, onClose }) {
+export default function Sidebar({ isOpen, onClose, navItems = [] }) {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { logout } = useAuth()
   const [collapsed, setCollapsed] = useState(false)
 
   // Close mobile drawer on route change
@@ -160,12 +87,21 @@ export default function Sidebar({ isOpen, onClose }) {
                 <NavLink
                   to={item.path}
                   end={item.path === '/dashboard'}
+                  onClick={(e) => {
+                    if (item.id === 'logout') {
+                      e.preventDefault()
+                      logout()
+                      navigate('/')
+                    }
+                  }}
                   className={({ isActive }) =>
                     [
                       'group flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium',
                       'transition-all duration-150 relative overflow-hidden',
-                      isActive
+                      isActive && item.id !== 'logout'
                         ? 'bg-[var(--color-soc-accent-glow)] text-[var(--color-soc-accent)] border border-[rgba(0,212,255,0.2)]'
+                        : item.id === 'logout'
+                        ? 'text-[var(--color-soc-red)] hover:bg-[var(--color-soc-red)] hover:bg-opacity-10'
                         : 'text-[var(--color-soc-text-muted)] hover:text-[var(--color-soc-text)] hover:bg-[var(--color-soc-card)]',
                     ].join(' ')
                   }
@@ -174,10 +110,10 @@ export default function Sidebar({ isOpen, onClose }) {
                   {({ isActive }) => (
                     <>
                       {/* Active left bar */}
-                      {isActive && (
+                      {isActive && item.id !== 'logout' && (
                         <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-[var(--color-soc-accent)] rounded-r" />
                       )}
-                      <span className={isActive ? 'text-[var(--color-soc-accent)]' : ''}>
+                      <span className={isActive && item.id !== 'logout' ? 'text-[var(--color-soc-accent)]' : ''}>
                         {item.icon}
                       </span>
                       {!collapsed && (

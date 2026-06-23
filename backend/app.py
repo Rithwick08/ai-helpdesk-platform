@@ -8,12 +8,19 @@ from routes.it_ticket import router as it_ticket_router
 from models.ticket_history import TicketHistory
 from routes.auth import router as auth_router
 from routes.assistant import router as assistant_router
+from routes.training import router as training_router
+from routes.training_video import (
+    router as training_video_router
+)
+from routes.security_update import (
+    router as security_update_router
+)
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,6 +33,11 @@ app.include_router(password_reset_router)
 app.include_router(it_ticket_router)
 app.include_router(auth_router)
 app.include_router(assistant_router)
+app.include_router(training_router)
+app.include_router(training_video_router)
+app.include_router(
+    security_update_router
+)
 
 @app.get("/")
 def home():

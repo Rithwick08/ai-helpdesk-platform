@@ -1,11 +1,10 @@
 from database import engine
 
-from models.user import User
-from models.training_recommendation import TrainingRecommendation
+from models.security_update import SecurityUpdate
 
-TrainingRecommendation.__table__.create(
+SecurityUpdate.__table__.create(
     engine,
     checkfirst=True
 )
 
-print("TrainingRecommendation table created.")
+print("Security Updates table created!")
