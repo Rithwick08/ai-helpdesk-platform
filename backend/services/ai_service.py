@@ -181,7 +181,7 @@ Rules:
         result = result.replace("```json", "").replace("```", "").strip()
 
     return json.loads(result)
-def diagnose_it_issue(issue):
+def diagnose_it_issue(issue, current_user):
 
     response = client.chat(
         model=REASONING_MODEL,
@@ -190,6 +190,7 @@ def diagnose_it_issue(issue):
                 "role": "user",
                 "content": f"""
 You are a Senior Enterprise IT Support Engineer.
+The user logging this issue is {current_user.name} (Email: {current_user.email}, Role: {current_user.role}, Dept: {current_user.department}).
 
 Analyze the following IT issue.
 
@@ -227,13 +228,11 @@ Rules:
 
 - priority must be Low, Medium, High or Critical.
 
-- diagnosis should be one sentence.
+- diagnosis should be one short concise sentence explaining the likely cause.
 
-- recommended_fix should summarize the best solution.
+- recommended_fix should summarize the best solution concisely.
 
-- resolution_steps MUST be an array of 3 to 5 steps.
-
-- Start with the least invasive fix.
+- resolution_steps MUST be an array of exactly 3 steps. Each step must be a concise, professional sentence (e.g. "Are you receiving an error message?", or "Please check if your VPN client is updated."). Do NOT ask for information you already know about the user (e.g. role, department). Start with the least invasive fix or clarification question.
 
 - Escalate only if the issue obviously requires a human technician.
 
@@ -269,33 +268,34 @@ Return JSON only.
     "should_escalate": True
 }
 
-def continue_it_troubleshooting(problem, conversation_history):
+def continue_it_troubleshooting(problem, conversation_history, current_user):
 
     response = client.chat(
         model=REASONING_MODEL,
         messages=[
             {
                 "role": "system",
-                "content": """
-You are a Senior IT Support Engineer.
+                "content": f"""
+You are a Senior IT Support Engineer for our company.
 
-The user has already tried previous troubleshooting steps.
+The user is {current_user.name} (Email: {current_user.email}, Role: {current_user.role}, Dept: {current_user.department}).
 
-Read the conversation carefully.
+The user has already tried previous troubleshooting steps. Read the conversation carefully.
 
-DO NOT repeat any previous solution.
-
-If another troubleshooting step exists, provide ONLY ONE new step.
-
-If no further troubleshooting is possible, return should_escalate=true.
+Rules:
+1. DO NOT repeat any previous solution or question.
+2. If another troubleshooting step exists, provide ONLY ONE new concise step or clarification question.
+3. Keep your response to 1-2 short sentences. Be professional, confident, and concise. Avoid generic phrases like "I understand" or "I'd be happy to help".
+4. NEVER ask for information you already know about the user (e.g. their department or role).
+5. If no further troubleshooting is possible, return should_escalate=true.
 
 Return ONLY JSON.
 
-{
+{{
     "response": "",
     "resolved": false,
     "should_escalate": false
-}
+}}
 """
             },
             {
@@ -318,7 +318,7 @@ Conversation:
         result = result.replace("```json", "").replace("```", "").strip()
 
     return json.loads(result)
-def generate_incident_questions(description):
+def generate_incident_questions(description, current_user):
 
     response = client.chat(
         model=REASONING_MODEL,
@@ -332,35 +332,16 @@ A user reported the following cybersecurity incident:
 
 {description}
 
-Ask the 3 most important follow-up questions needed before creating a security incident.
+The user reporting this is {current_user.name} (Email: {current_user.email}, Role: {current_user.role}, Dept: {current_user.department}).
 
-The questions should depend on the incident.
-
-Examples:
-
-Phishing:
-- Did you enter your password?
-- Did you download any attachment?
-- Is MFA enabled?
-
-Malware:
-- Is the device still powered on?
-- Has antivirus detected anything?
-- Are other devices affected?
-
-Lost Laptop:
-- Was disk encryption enabled?
-- Was it a company device?
-- Has it been reported to security?
+Ask exactly ONE most important follow-up question needed before creating a security incident.
+Do NOT ask for information you already know about the user.
+Do not ask multiple questions. Make it concise and professional.
 
 Return ONLY valid JSON.
 
 {{
-    "questions": [
-        "",
-        "",
-        ""
-    ]
+    "question": ""
 }}
 """
             }
@@ -373,17 +354,18 @@ Return ONLY valid JSON.
         result = result.replace("```json", "").replace("```", "").strip()
 
     return json.loads(result)
-def continue_security_incident(problem, conversation_history):
+def continue_security_incident(problem, conversation_history, current_user):
 
     response = client.chat(
         model=REASONING_MODEL,
         messages=[
             {
                 "role": "system",
-                "content": """
+                "content": f"""
 You are a Senior SOC Analyst.
 
 The employee has answered follow-up questions.
+The user reporting this is {current_user.name} (Email: {current_user.email}, Role: {current_user.role}, Dept: {current_user.department}).
 
 Read the ENTIRE conversation.
 
@@ -392,10 +374,11 @@ Determine:
 - Has the incident become more severe?
 - Should the incident be created?
 - What immediate containment actions should the employee perform?
+- Your response should be a professional, confident 1-2 sentence statement avoiding generic chatbot filler.
 
 Return ONLY JSON.
 
-{
+{{
     "severity": "",
     "response": "",
     "containment": [
@@ -404,7 +387,7 @@ Return ONLY JSON.
         ""
     ],
     "create_incident": true
-}
+}}
 """
             },
             {
@@ -495,3 +478,4 @@ Keep answers concise and educational.
     return {
         "answer": response.choices[0].message.content
     }
+

@@ -27,7 +27,7 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     try {
       // existing backend expects credentials
-      const response = await axios.post('http://localhost:8000/auth/login', {
+      const response = await axios.post('http://localhost:8002/auth/login', {
         email,
         password,
       })

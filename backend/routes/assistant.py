@@ -1,8 +1,9 @@
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from database import get_db
-
 from auth.dependencies import get_current_user
 from models.training_recommendation import TrainingRecommendation
 from models.user import User
@@ -12,11 +13,17 @@ from services.ai_service import recommend_training
 from schemas.assistant import ChatRequest
 from agent.agent import CyberDeskAgent
 from agent.assistant_ai import chat_with_ai
+from agent.planner import Planner
+from agent.workflow_memory import WorkflowMemory
+from agent.states import ConversationState
+
+logger = logging.getLogger("cyberdesk.route")
 
 router = APIRouter(
     prefix="/assistant",
     tags=["AI Assistant"]
 )
+
 
 @router.post("/chat")
 def chat(
@@ -24,127 +31,121 @@ def chat(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-
-    # Create new conversation if needed
+    # ── 1. Resolve or create conversation ─────────────────────────────────────
     if request.conversation_id is None:
-
-        conversation = AssistantConversation(
-            user_id=current_user.id
-        )
-
+        conversation = AssistantConversation(user_id=current_user.id)
         db.add(conversation)
         db.commit()
         db.refresh(conversation)
-
-    # Continue existing conversation
     else:
-
-        conversation = db.query(
-            AssistantConversation
-        ).filter(
+        conversation = db.query(AssistantConversation).filter(
             AssistantConversation.id == request.conversation_id
         ).first()
-
         if conversation is None:
-            return {
-                "error": "Conversation not found"
-            }
+            return {"error": "Conversation not found"}
 
-    # Save user's message
-    user_message = AssistantMessage(
+    logger.info(
+        "[ROUTE] user=%s | conv=%s | state=%s | message=%r",
+        current_user.email,
+        conversation.id,
+        getattr(conversation, "workflow_state", "IDLE"),
+        request.message[:80],
+    )
+
+    # ── 2. Save user message ───────────────────────────────────────────────────
+    db.add(AssistantMessage(
         conversation_id=conversation.id,
         sender="user",
         message=request.message
-    )
-
-    db.add(user_message)
+    ))
     db.commit()
-    # Load conversation history
-    history = (
-        db.query(AssistantMessage)
-        .filter(
-            AssistantMessage.conversation_id == conversation.id
-        )
-        .order_by(AssistantMessage.created_at)
-        .all()
-    )
 
-    conversation_history = []
+    # ── 3. Planner pre-flight ──────────────────────────────────────────────────
+    # Load workflow memory before the planner runs
+    memory = WorkflowMemory(conversation.collected_entities)
+    planner_decision = Planner.decide(request.message.strip(), conversation, memory)
 
-    for msg in history:
+    # ── 4. Decide whether to call the LLM ─────────────────────────────────────
+    # The LLM is SKIPPED for deterministic decisions.
+    LLM_REQUIRED_ACTIONS = {"llm"}
 
-        role = "assistant"
-
-        if msg.sender == "user":
-            role = "user"
-
-        conversation_history.append(
-            {
-                "role": role,
-                "content": msg.message
-            }
-        )
-
-    # Get AI response
-    ai_result = chat_with_ai(conversation_history)
-    print(ai_result)
-    agent_result = CyberDeskAgent.run(
-    ai_result=ai_result,
-    request=request,
-    conversation=conversation,
-    current_user=current_user,
-    db=db
-    )
-
-    # Save AI response
-    assistant_message = AssistantMessage(
-    conversation_id=conversation.id,
-    sender="assistant",
-    message=agent_result["response"]
-    )
-
-    db.add(assistant_message)
-    db.commit()
-    if agent_result["status"] == "completed":
-
-        history = (
+    if planner_decision.action in LLM_REQUIRED_ACTIONS:
+        # Build conversation history for LLM context
+        history_rows = (
             db.query(AssistantMessage)
-            .filter(
-                AssistantMessage.conversation_id == conversation.id
-            )
+            .filter(AssistantMessage.conversation_id == conversation.id)
             .order_by(AssistantMessage.created_at)
             .all()
         )
-
-        conversation_text = ""
-
-        for msg in history:
-            conversation_text += f"{msg.sender}: {msg.message}\n"
-
-        recommendations = recommend_training(
-            conversation_text
+        conversation_history = [
+            {"role": "assistant" if m.sender == "assistant" else "user", "content": m.message}
+            for m in history_rows
+        ]
+        ai_result = chat_with_ai(conversation_history, current_user, memory=memory)
+        logger.info(
+            "[ROUTE] LLM result: state=%s | tool=%s",
+            ai_result.get("recommended_state"),
+            ai_result.get("recommended_tool"),
         )
-        db.query(TrainingRecommendation).filter(
-            TrainingRecommendation.user_id == current_user.id,
-            TrainingRecommendation.is_active == True
-        ).update(
-            {
-                TrainingRecommendation.is_active: False
-            }
-        )
+    else:
+        # Short-circuit — no LLM call needed
+        ai_result = None
+        logger.info("[ROUTE] LLM skipped — planner action=%s", planner_decision.action)
 
-        db.commit()
-        for topic in recommendations["topics"]:
+    # ── 5. Run agent ───────────────────────────────────────────────────────────
+    agent_result = CyberDeskAgent.run(
+        ai_result=ai_result,
+        request=request,
+        conversation=conversation,
+        current_user=current_user,
+        db=db,
+    )
 
-            db.add(
-                TrainingRecommendation(
+    logger.info(
+        "[ROUTE] agent_result status=%s | conv=%s | new_state=%s",
+        agent_result.get("status"),
+        conversation.id,
+        getattr(conversation, "workflow_state", "?"),
+    )
+
+    # ── 6. Save AI response message ────────────────────────────────────────────
+    db.add(AssistantMessage(
+        conversation_id=conversation.id,
+        sender="assistant",
+        message=agent_result.get("response", "")
+    ))
+    db.commit()
+
+    # ── 7. On completion: generate training recommendations ───────────────────
+    if agent_result.get("status") == "completed":
+        try:
+            history_rows = (
+                db.query(AssistantMessage)
+                .filter(AssistantMessage.conversation_id == conversation.id)
+                .order_by(AssistantMessage.created_at)
+                .all()
+            )
+            conversation_text = "\n".join(f"{m.sender}: {m.message}" for m in history_rows)
+            recommendations = recommend_training(conversation_text)
+
+            # Deactivate old recommendations
+            db.query(TrainingRecommendation).filter(
+                TrainingRecommendation.user_id == current_user.id,
+                TrainingRecommendation.is_active == True
+            ).update({TrainingRecommendation.is_active: False})
+            db.commit()
+
+            for topic in recommendations.get("topics", []):
+                db.add(TrainingRecommendation(
                     user_id=current_user.id,
                     topic=topic,
                     is_active=True
-                )
-            )
+                ))
+            db.commit()
+            logger.info("[ROUTE] training recommendations saved for user=%s", current_user.email)
+        except Exception as e:
+            logger.warning("[ROUTE] training recommendation failed: %s", e)
 
-        db.commit()
     return {
         "conversation_id": conversation.id,
         **agent_result

@@ -4,7 +4,7 @@ from passlib.context import CryptContext
 
 SECRET_KEY = "change-this-to-a-long-random-secret-key"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = 1440
 
 pwd_context = CryptContext(
     schemes=["bcrypt"],

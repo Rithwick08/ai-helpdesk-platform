@@ -14,24 +14,16 @@ from fastapi import APIRouter, Depends
 router = APIRouter(
     tags=["SOC Alerts"],
     dependencies=[
-        Depends(require_roles(["admin", "soc_analyst"]))
+        Depends(require_roles(["admin", "soc"]))
     ]
 )
 @router.get("/incidents")
-def get_incidents(
-    current_user: User = Depends(
-        require_roles(["admin", "soc_analyst"])
-    ),
-    db: Session = Depends(get_db)
-):
+def get_incidents(db: Session = Depends(get_db)):
     return db.query(Incident).all()
 
 @router.post("/incidents")
-@router.get("/incidents")
-def get_incidents(
-    current_user: User = Depends(
-        require_roles(["admin", "soc_analyst"])
-    ),
+def create_incident(
+    incident: IncidentCreate,
     db: Session = Depends(get_db)
 ):
     analysis = classify_incident(

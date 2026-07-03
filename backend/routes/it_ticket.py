@@ -18,7 +18,7 @@ from auth.dependencies import require_roles
 router = APIRouter(
     tags=["IT Support"],
     dependencies=[
-        Depends(require_roles(["admin", "it_support"]))
+        Depends(require_roles(["admin", "it"]))
     ]
 )
 

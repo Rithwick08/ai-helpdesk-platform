@@ -1,10 +1,12 @@
 from database import engine
 
-from models.security_update import SecurityUpdate
+from models.user import User
+from models.training_video import TrainingVideo
+from models.training_progress import TrainingProgress
 
-SecurityUpdate.__table__.create(
+TrainingProgress.__table__.create(
     engine,
     checkfirst=True
 )
 
-print("Security Updates table created!")
+print("training_progress table created")

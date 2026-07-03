@@ -8,7 +8,8 @@
  *  - Right-side info panel: Quick actions, My Tickets, Security tip
  */
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { chatAssistant, transcribeAudio } from '../api/assistant'
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 const MicIcon    = ({ cls }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className={cls}><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0014 0M12 19v3M8 22h8"/></svg>
@@ -44,26 +45,6 @@ const SECURITY_TIPS = [
   { icon: '💻', tip: 'Lock your screen (Win+L / Cmd+Ctrl+Q) every time you step away.' },
 ]
 
-const AI_RESPONSES = {
-  default:  [{ type: 'text', content: 'I\'m here to help! You can ask me to reset your password, report a security incident, create an IT support ticket, or answer security questions.' }],
-  password: [{ type: 'text', content: 'Starting your secure password reset now.' }, { type: 'action', label: 'Password Reset Initiated', detail: 'OTP sent to john.doe@corp.com · Enter the code when received · Expires in 10 minutes', status: 'pending' }],
-  incident: [{ type: 'text', content: 'Creating a security incident report immediately. Can you briefly describe what you observed?' }, { type: 'action', label: 'Incident Report Created', detail: 'INC-00431 · Security Incident · Open · SOC team notified · Severity assessment in progress', status: 'success' }],
-  ticket:   [{ type: 'text', content: 'I\'ll diagnose your issue and create a support ticket. Describe the problem you\'re experiencing.' }, { type: 'action', label: 'IT Ticket Created', detail: 'TKT-1043 · Priority: Medium · AI Diagnosis in progress · Step-by-step fix incoming', status: 'success' }],
-  security: [{ type: 'text', content: 'Great question! I can help with security policies, best practices, threat awareness, and compliance. What would you like to know?' }],
-  vpn:      [{ type: 'text', content: 'Diagnosing your VPN issue now.' }, { type: 'action', label: 'IT Ticket Created', detail: 'TKT-1043 · VPN Issue · Priority: High · MTU mismatch detected on tunnel interface · Fix: Set MTU to 1400 in VPN adapter settings', status: 'success' }],
-  phishing: [{ type: 'text', content: 'Escalating to your SOC team immediately. Do not click any links in the email.' }, { type: 'action', label: 'Security Incident Reported', detail: 'INC-00432 · Phishing Attempt · Severity: High · SOC alerted · Email quarantine request sent', status: 'critical' }],
-}
-
-function getAIResponse(text) {
-  const t = text.toLowerCase()
-  if (t.includes('password') || t.includes('reset'))       return AI_RESPONSES.password
-  if (t.includes('phishing') || t.includes('suspicious'))  return AI_RESPONSES.phishing
-  if (t.includes('incident') || t.includes('attack'))      return AI_RESPONSES.incident
-  if (t.includes('vpn'))                                    return AI_RESPONSES.vpn
-  if (t.includes('ticket') || t.includes('support') || t.includes('issue') || t.includes('problem')) return AI_RESPONSES.ticket
-  if (t.includes('security') || t.includes('policy'))      return AI_RESPONSES.security
-  return AI_RESPONSES.default
-}
 
 const STATUS_STYLE = {
   'In Progress':          'bg-amber-500/20 text-amber-300 border border-amber-500/30',
@@ -76,9 +57,9 @@ const STATUS_STYLE = {
 
 // ── Orb ───────────────────────────────────────────────────────────────────────
 // Inspired by the React Bits "Orb" — a large glowing ring with cyan→purple gradient.
-function Orb({ listening, aiTyping }) {
-  // Pulse scale: bigger when listening/processing
-  const active = listening || aiTyping
+function Orb({ listening, aiTyping, aiSpeaking, onTap }) {
+  // Pulse scale: bigger when listening/processing/speaking
+  const active = listening || aiTyping || aiSpeaking
 
   return (
     <div className="relative flex items-center justify-center select-none"
@@ -140,22 +121,24 @@ function Orb({ listening, aiTyping }) {
       <div className="relative z-10 flex flex-col items-center gap-3">
         {/* State label */}
         <p className="text-[11px] font-mono tracking-[0.22em] uppercase"
-          style={{ color: listening ? '#ff3b5c' : aiTyping ? '#ffb020' : 'rgba(255,255,255,0.35)' }}>
-          {listening ? 'Listening...' : aiTyping ? 'Processing...' : 'Awaiting input'}
+          style={{ color: listening ? '#ff3b5c' : aiSpeaking ? '#00ff88' : aiTyping ? '#ffb020' : 'rgba(255,255,255,0.35)' }}>
+          {listening ? 'Listening...' : aiSpeaking ? 'Speaking...' : aiTyping ? 'Processing...' : 'Awaiting input'}
         </p>
 
         {/* Mic button — no circle, bare icon */}
         <button
           id="mic-button"
-          onClick={() => {}}
+          onClick={onTap}
           aria-label="Toggle voice input"
           className="relative flex items-center justify-center transition-all duration-300 hover:scale-110 active:scale-95"
           style={{ background: 'none', border: 'none', padding: 0 }}>
           <MicIcon cls="w-8 h-8" style={{
-            color: listening ? '#ff3b5c' : 'rgba(0,212,255,0.75)',
+            color: listening ? '#ff3b5c' : aiSpeaking ? '#00ff88' : 'rgba(0,212,255,0.75)',
             filter: listening
               ? 'drop-shadow(0 0 8px rgba(255,59,92,0.7))'
-              : 'drop-shadow(0 0 6px rgba(0,212,255,0.5))',
+              : aiSpeaking
+                ? 'drop-shadow(0 0 8px rgba(0,255,136,0.7))'
+                : 'drop-shadow(0 0 6px rgba(0,212,255,0.5))',
           }} />
         </button>
 
@@ -185,6 +168,55 @@ function ActionCard({ label, detail, status }) {
   )
 }
 
+function extractAction(text) {
+  if (!text) return null;
+
+  const prMatch = text.match(/Password Reset Request #(\d+)/i);
+  if (prMatch) {
+    return {
+      label: 'PASSWORD RESET INITIATED',
+      detail: `Request ID: PR-${prMatch[1]} · OTP sent to registered device · Expires in 15 mins · Status: Pending Verification`,
+      status: 'pending'
+    };
+  }
+
+  const incMatch = text.match(/Security Incident #(\d+)/i);
+  if (incMatch) {
+    return {
+      label: 'SECURITY INCIDENT CREATED',
+      detail: `Incident ID: INC-${incMatch[1]} · Severity: High · Assigned SOC Analyst: Pending Review · Status: Open`,
+      status: 'critical'
+    };
+  }
+
+  const tktMatch = text.match(/Ticket ID: (\d+)/i);
+  if (tktMatch) {
+    return {
+      label: 'IT TICKET CREATED',
+      detail: `Ticket Number: TKT-${tktMatch[1]} · Priority: Standard · Estimated Resolution: 2-4 hours · Assigned Queue: L1 Helpdesk`,
+      status: 'success'
+    };
+  }
+
+  if (text.toLowerCase().includes('training') && !text.toLowerCase().includes('completed')) {
+    return {
+      label: 'TRAINING RECOMMENDED',
+      detail: `Video Title: Core Security Awareness · Estimated Duration: 15 mins · Reason: AI Risk Assessment`,
+      status: 'pending'
+    };
+  }
+  
+  if (text.toLowerCase().includes('security update') || text.toLowerCase().includes('patch')) {
+    return {
+      label: 'SECURITY UPDATE',
+      detail: `Critical patch deployed successfully · Device compliance restored.`,
+      status: 'success'
+    };
+  }
+
+  return null;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 export default function AssistantPage() {
   const [chatOpen, setChatOpen]     = useState(false)
@@ -196,34 +228,204 @@ export default function AssistantPage() {
   const [input, setInput]           = useState('')
   const [listening, setListening]   = useState(false)
   const [aiTyping, setAiTyping]     = useState(false)
+  const [aiSpeaking, setAiSpeaking] = useState(false)
   const [tipIndex, setTipIndex]     = useState(0)
+  const [conversationId, setConversationId] = useState(null)
+  
+  const [voiceModeState, setVoiceModeState] = useState(false)
+  const voiceModeRef = useRef(false)
+  const setVoiceMode = (val) => {
+    voiceModeRef.current = val
+    setVoiceModeState(val)
+  }
+
   const chatEndRef                  = useRef(null)
   const inputRef                    = useRef(null)
+  // Whisper voice recording refs (replaces SpeechRecognition)
+  const mediaRecorderRef            = useRef(null)
+  const audioChunksRef              = useRef([])
+  const streamRef                   = useRef(null)
+  const synthRef                    = useRef(window.speechSynthesis)
+  const latestSendMessage           = useRef(null)
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, aiTyping])
 
   useEffect(() => {
-    if (chatOpen) setTimeout(() => inputRef.current?.focus(), 300)
-  }, [chatOpen])
+    latestSendMessage.current = sendMessage
+  })
 
-  function sendMessage(text) {
+  // ── Whisper: start recording from microphone ────────────────────────────────
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current   = stream
+      audioChunksRef.current = []
+
+      // Prefer webm/opus (Chrome/Edge); Firefox falls back to ogg/opus
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : 'audio/ogg'
+
+      const recorder = new MediaRecorder(stream, { mimeType })
+      mediaRecorderRef.current = recorder
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      recorder.onstop = async () => {
+        // Stop mic tracks
+        streamRef.current?.getTracks().forEach(t => t.stop())
+        streamRef.current = null
+        setListening(false)
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
+        audioChunksRef.current = []
+
+        if (audioBlob.size < 1000) {
+          // Too short — likely silence
+          if (voiceModeRef.current) {
+            // Re-arm for next utterance
+            startRecording()
+          }
+          return
+        }
+
+        setAiTyping(true)
+        try {
+          const result = await transcribeAudio(audioBlob)
+          if (result.transcript) {
+            latestSendMessage.current(result.transcript)
+          } else {
+            // Whisper returned no text — show friendly error
+            setMessages(prev => [...prev, {
+              id: Date.now(), role: 'ai',
+              text: result.error || "I couldn't understand that. Could you try again?",
+              time: 'just now',
+            }])
+            setAiTyping(false)
+            if (voiceModeRef.current) startRecording()
+          }
+        } catch (err) {
+          console.error('[Whisper] transcription error', err)
+          setMessages(prev => [...prev, {
+            id: Date.now(), role: 'ai',
+            text: "I couldn't understand that. Could you try again?",
+            time: 'just now',
+          }])
+          setAiTyping(false)
+          if (voiceModeRef.current) startRecording()
+        }
+      }
+
+      recorder.start()
+      setListening(true)
+    } catch (err) {
+      console.error('[Whisper] microphone access error', err)
+      setListening(false)
+      setVoiceMode(false)
+      setMessages(prev => [...prev, {
+        id: Date.now(), role: 'ai',
+        text: 'Microphone access denied. Please allow microphone access and try again.',
+        time: 'just now',
+      }])
+    }
+  }
+
+  function stopRecording() {
+    try { mediaRecorderRef.current?.stop() } catch (e) {}
+    // streamRef tracks stopped inside onstop handler
+  }
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      synthRef.current?.cancel()
+      stopRecording()
+    }
+  }, [])
+
+  function speakResponse(text, shouldContinueListening) {
+    if (!synthRef.current) return
+    synthRef.current.cancel()
+    
+    setAiSpeaking(true)
+    const cleanText = text.replace(/[#✅•⚠️*]/g, '').replace(/https?:\/\/[^\s]+/g, 'a link')
+    const utterance = new SpeechSynthesisUtterance(cleanText)
+    
+    utterance.onend = () => {
+      setAiSpeaking(false)
+      if (shouldContinueListening && voiceModeRef.current) {
+        // Re-arm the Whisper recorder for the next user utterance
+        startRecording()
+      } else {
+        setVoiceMode(false)
+      }
+    }
+    
+    utterance.onerror = () => {
+       setAiSpeaking(false)
+       setVoiceMode(false)
+    }
+
+    synthRef.current.speak(utterance)
+  }
+
+  function handleOrbTap() {
+    // If currently active — stop everything
+    if (aiSpeaking || listening) {
+      synthRef.current?.cancel()
+      setAiSpeaking(false)
+      setListening(false)
+      setVoiceMode(false)
+      stopRecording()
+      return
+    }
+
+    // Start a new voice session
+    setVoiceMode(true)
+    speakResponse('Hello! How can I help you today?', true)
+  }
+
+  async function sendMessage(text) {
     if (!text.trim() || aiTyping) return
     setMessages(prev => [...prev, { id: Date.now(), role: 'user', text: text.trim(), time: 'just now' }])
     setInput('')
     setAiTyping(true)
-    setTimeout(() => {
-      const responses = getAIResponse(text)
-      setMessages(prev => [...prev, ...responses.map((r, i) => ({
-        id: Date.now() + i + 1,
+    
+    try {
+      const res = await chatAssistant(conversationId, text)
+      if (res.conversation_id) {
+        setConversationId(res.conversation_id)
+      }
+      const responseText = res.response || res.message || 'I have completed your request.'
+      const actionCard = extractAction(responseText)
+
+      setMessages(prev => [...prev, {
+        id: Date.now(),
         role: 'ai',
-        text: r.type === 'text' ? r.content : null,
-        action: r.type === 'action' ? r : null,
+        text: actionCard ? null : responseText,
+        action: actionCard,
         time: 'just now',
-      }))])
+      }])
+
+      speakResponse(responseText, res.status !== 'completed')
+    } catch (err) {
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        role: 'ai',
+        text: 'Sorry, I couldn’t reach the AI assistant.',
+        action: null,
+        time: 'just now',
+      }])
+      setVoiceMode(false)
+    } finally {
       setAiTyping(false)
-    }, 1200)
+    }
   }
 
   function handleKeyDown(e) {
@@ -267,7 +469,7 @@ export default function AssistantPage() {
           </div>
 
           {/* Orb */}
-          <Orb listening={listening} aiTyping={aiTyping} />
+          <Orb listening={listening} aiTyping={aiTyping} aiSpeaking={aiSpeaking} onTap={handleOrbTap} />
 
           {/* Quick action pills */}
           <div className="flex flex-wrap justify-center gap-2 max-w-lg">

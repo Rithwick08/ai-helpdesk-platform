@@ -8,4 +8,14 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  server: {
+    proxy: {
+      // WebSocket streaming audio → FastAPI
+      '/ws': {
+        target: 'ws://localhost:8000',
+        ws: true,
+        rewriteWsOrigin: true,
+      },
+    },
+  },
 })

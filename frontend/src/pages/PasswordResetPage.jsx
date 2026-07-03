@@ -14,11 +14,13 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  getPasswordResets,
+  getPasswordRequests as getPasswordResets,
   createPasswordReset,
   verifyOTP,
-  approvePasswordReset,
-} from '../api/passwordResetService'
+  approvePasswordRequest as approvePasswordReset,
+  updatePasswordRequest,
+  deletePasswordRequest
+} from '../api/passwordReset'
 import { SkeletonRow } from '../components/Skeletons'
 import ErrorBanner from '../components/ErrorBanner'
 
@@ -185,7 +187,7 @@ function WorkflowTimeline({ status }) {
 // Detail Drawer
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ResetDrawer({ reset, onClose, onApproved }) {
+function ResetDrawer({ reset, onClose, onApproved, onUpdated, onDeleted }) {
   const [approving, setApproving] = useState(false)
   const [approveError, setApproveError] = useState('')
 
@@ -203,7 +205,26 @@ function ResetDrawer({ reset, onClose, onApproved }) {
       onApproved(reset.id, result.status, result.action_taken)
       onClose()
     } catch (err) {
-      setApproveError(err.message || 'Failed to approve reset request.')
+      setApproveError(err.response?.data?.message || err.message || 'Failed to approve reset request.')
+    } finally {
+      setApproving(false)
+    }
+  }
+
+  async function handleAction(status) {
+    setApproving(true)
+    setApproveError('')
+    try {
+      if (status === 'Deleted') {
+        await deletePasswordRequest(reset.id)
+        if (onDeleted) onDeleted(reset.id)
+      } else {
+        const result = await updatePasswordRequest(reset.id, { status })
+        if (onUpdated) onUpdated(reset.id, result.status)
+      }
+      onClose()
+    } catch (err) {
+      setApproveError(err.response?.data?.message || err.message || `Failed to ${status} request.`)
     } finally {
       setApproving(false)
     }
@@ -324,7 +345,7 @@ function ResetDrawer({ reset, onClose, onApproved }) {
 
         {/* Footer — Approve button */}
         {canApprove && (
-          <div className="px-6 py-4 border-t border-[var(--color-soc-border-subtle)]">
+          <div className="px-6 py-4 border-t border-[var(--color-soc-border-subtle)] space-y-3">
             <button
               id={`approve-btn-${reset.id}`}
               onClick={handleApprove}
@@ -332,37 +353,40 @@ function ResetDrawer({ reset, onClose, onApproved }) {
               className="w-full py-3 rounded-xl bg-[var(--color-soc-green)] text-[var(--color-soc-bg)] font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
               style={{ boxShadow: '0 0 20px var(--color-soc-green-glow)' }}
             >
-              {approving ? (
-                <>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 animate-spin">
-                    <path d="M21 12a9 9 0 11-6.219-8.56"/>
-                  </svg>
-                  Approving Reset…
-                </>
-              ) : (
-                <>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                  </svg>
-                  Approve Password Reset
-                </>
-              )}
+              {approving ? 'Approving...' : 'Approve Password Reset'}
             </button>
-            <p className="text-[10px] text-[var(--color-soc-text-dim)] text-center mt-2">
-              This will execute the reset and mark the request as Completed
-            </p>
-          </div>
-        )}
-        {reset.status === 'Completed' && (
-          <div className="px-6 py-4 border-t border-[var(--color-soc-border-subtle)]">
-            <div className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--color-soc-green-glow)] border border-[rgba(0,255,136,0.2)]">
-              <svg viewBox="0 0 24 24" fill="none" stroke="var(--color-soc-green)" strokeWidth={2.5} className="w-4 h-4">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
-              <span className="text-sm font-bold text-[var(--color-soc-green)]">Reset Completed</span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleAction('Rejected')}
+                disabled={approving}
+                className="flex-1 py-2 rounded-xl border border-[var(--color-soc-red)] text-[var(--color-soc-red)] font-bold text-xs hover:bg-[var(--color-soc-red-glow)] transition-colors disabled:opacity-50"
+              >
+                Reject
+              </button>
+              <button
+                onClick={() => handleAction('Completed')}
+                disabled={approving}
+                className="flex-1 py-2 rounded-xl border border-[var(--color-soc-accent)] text-[var(--color-soc-accent)] font-bold text-xs hover:bg-[var(--color-soc-accent-glow)] transition-colors disabled:opacity-50"
+              >
+                Complete
+              </button>
             </div>
           </div>
         )}
+        <div className="px-6 py-4 border-t border-[var(--color-soc-border-subtle)]">
+            {reset.status === 'Completed' && (
+              <div className="flex items-center justify-center gap-2 py-2.5 mb-3 rounded-xl bg-[var(--color-soc-green-glow)] border border-[rgba(0,255,136,0.2)]">
+                <span className="text-sm font-bold text-[var(--color-soc-green)]">Reset Completed</span>
+              </div>
+            )}
+            <button
+              onClick={() => handleAction('Deleted')}
+              disabled={approving}
+              className="w-full py-2 rounded-xl border border-[var(--color-soc-border-subtle)] text-[var(--color-soc-text-dim)] hover:text-[var(--color-soc-red)] hover:border-[var(--color-soc-red)] font-bold text-xs transition-colors disabled:opacity-50"
+            >
+              Delete Request
+            </button>
+        </div>
       </aside>
     </>
   )
@@ -685,6 +709,18 @@ export default function PasswordResetPage() {
     setSelected((prev) => prev?.id === id ? { ...prev, status: newStatus, action_taken: newAction } : prev)
   }
 
+  function handleUpdated(id, newStatus) {
+    setResets((prev) =>
+      prev.map((r) => r.id === id ? { ...r, status: newStatus } : r)
+    )
+    setSelected((prev) => prev?.id === id ? { ...prev, status: newStatus } : prev)
+  }
+
+  function handleDeleted(id) {
+    setResets((prev) => prev.filter(r => r.id !== id))
+    setSelected(null)
+  }
+
   function handleCreated() { fetchResets() }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -951,6 +987,8 @@ export default function PasswordResetPage() {
           reset={selected}
           onClose={() => setSelected(null)}
           onApproved={handleApproved}
+          onUpdated={handleUpdated}
+          onDeleted={handleDeleted}
         />
       )}
     </div>

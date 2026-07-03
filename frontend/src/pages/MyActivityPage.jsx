@@ -12,12 +12,13 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { motion, useInView, useAnimation } from 'framer-motion'
+import { motion, useInView } from 'framer-motion'
 import {
   Ticket, Lock, ShieldAlert, BookOpen, Clock, Flame,
   CheckCircle2, AlertCircle, CircleDot, TrendingUp, Activity,
   Cpu, BarChart2, Calendar, Zap, ChevronRight, Award,
 } from 'lucide-react'
+import { getMyActivity } from '../api/myActivity'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Employee data (static — replace with auth context + API later)
@@ -34,13 +35,6 @@ const EMPLOYEE = {
   lastAI:     '2 hours ago',
 }
 
-const STATS = {
-  tickets:    { open: 2, resolved: 14, pending: 1 },
-  resets:     { completed: 5, pending: 1 },
-  incidents:  { reported: 3, resolved: 2, escalated: 1 },
-  training:   { completed: 7, hours: 4.5, streak: 7 },
-}
-
 // Monthly AI interaction counts (Jan–Jun)
 const AI_USAGE = [
   { month: 'Jan', count: 8  },
@@ -55,19 +49,6 @@ const AI_USAGE = [
 const SCORE_TREND = [68, 71, 70, 74, 78, 76, 80, 82]
 
 const TRAINING_COMPLETION = 58  // percent
-
-const RECENT_ACTIVITY = [
-  { id: 1,  type: 'ai',       icon: Cpu,           color: '#00d4ff', label: 'Asked AI about VPN configuration',       time: '2 hours ago',   tag: 'AI Interaction' },
-  { id: 2,  type: 'training', icon: BookOpen,      color: '#7850ff', label: 'Completed: Phishing Awareness module',   time: '5 hours ago',   tag: 'Training' },
-  { id: 3,  type: 'reset',    icon: Lock,          color: '#00ff88', label: 'Password reset completed successfully',  time: 'Yesterday',     tag: 'Password Reset' },
-  { id: 4,  type: 'incident', icon: ShieldAlert,   color: '#ff3b5c', label: 'Reported suspicious phishing email',     time: '2 days ago',    tag: 'Security Incident' },
-  { id: 5,  type: 'ai',       icon: Cpu,           color: '#00d4ff', label: 'Asked AI to open IT ticket for VPN',    time: '2 days ago',    tag: 'AI Interaction' },
-  { id: 6,  type: 'ticket',   icon: Ticket,        color: '#ffb020', label: 'IT Ticket TKT-1042 marked resolved',     time: '3 days ago',    tag: 'IT Ticket' },
-  { id: 7,  type: 'training', icon: BookOpen,      color: '#7850ff', label: 'Completed: MFA Setup & Best Practices',  time: '4 days ago',    tag: 'Training' },
-  { id: 8,  type: 'ai',       icon: Cpu,           color: '#00d4ff', label: 'Asked AI about mobile security policy',  time: '5 days ago',    tag: 'AI Interaction' },
-  { id: 9,  type: 'reset',    icon: Lock,          color: '#00ff88', label: 'Initiated password reset for jdoe-admin','time': '1 week ago',  tag: 'Password Reset' },
-  { id: 10, type: 'ticket',   icon: Ticket,        color: '#ffb020', label: 'Opened ticket: Outlook not syncing',     time: '1 week ago',    tag: 'IT Ticket' },
-]
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Reusable primitives
@@ -166,7 +147,7 @@ function MiniStat({ label, value, color, suffix = '' }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function StatCard({ icon: Icon, title, accent, children, delay = 0 }) {
   return (
-    <motion.div {...fadeUp(delay)}>
+    <motion.div {...fadeUp(delay)} className="h-full">
       <GlassCard hover className="p-5 h-full">
         <div className="flex items-center gap-2.5 mb-4">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -408,15 +389,63 @@ function TimelineEntry({ item, index, isLast }) {
   )
 }
 
+const getActivityIcon = (type) => {
+  if (type === 'incident') return { icon: ShieldAlert, color: '#ff3b5c', tag: 'Security Incident' }
+  if (type === 'ticket') return { icon: Ticket, color: '#ffb020', tag: 'IT Ticket' }
+  if (type === 'reset') return { icon: Lock, color: '#00ff88', tag: 'Password Reset' }
+  return { icon: Activity, color: '#00d4ff', tag: 'Activity' }
+}
+
+const formatTimeAgo = (dateStr) => {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} mins ago`
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)} hours ago`
+  return `${Math.floor(diff / 86400000)} days ago`
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Page
 // ─────────────────────────────────────────────────────────────────────────────
 export default function MyActivityPage() {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const fetchActivity = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const res = await getMyActivity()
+      setData(res)
+    } catch (err) {
+      setError(err.message || "Failed to load activity.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchActivity()
+  }, [])
+
   const scoreColor = EMPLOYEE.securityScore >= 80 ? '#00ff88' : EMPLOYEE.securityScore >= 60 ? '#00d4ff' : '#ffb020'
   const scoreLabel = EMPLOYEE.securityScore >= 80 ? 'Excellent' : EMPLOYEE.securityScore >= 60 ? 'Good' : 'Needs Work'
 
   return (
     <div className="min-h-screen px-5 sm:px-8 py-8 max-w-[1200px] mx-auto" style={{ color: '#fff' }}>
+
+      {error && (
+        <div className="mb-6 p-4 rounded-xl border border-red-500/50 bg-red-500/10 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="text-red-400" />
+            <div>
+              <p className="text-sm font-bold text-red-400">Connection Error</p>
+              <p className="text-xs text-red-300/70 mt-0.5">{error}</p>
+            </div>
+          </div>
+          <button onClick={fetchActivity} className="px-4 py-1.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold hover:bg-red-500 hover:text-white transition-all">Retry</button>
+        </div>
+      )}
 
       {/* ── Page title ── */}
       <motion.div {...fadeUp(0)} className="mb-8">
@@ -499,30 +528,43 @@ export default function MyActivityPage() {
 
       {/* ══ STAT CARDS ═════════════════════════════════════════════════════════ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+        {loading ? (
+          <>
+            {[1,2,3,4].map(i => (
+              <div key={i} className="bg-white/5 border border-white/5 rounded-2xl h-[120px] animate-pulse p-5">
+                <div className="w-8 h-8 rounded-xl bg-white/10 mb-4" />
+                <div className="h-4 bg-white/10 rounded w-1/2 mb-2" />
+                <div className="h-4 bg-white/10 rounded w-1/3" />
+              </div>
+            ))}
+          </>
+        ) : (
+          <>
+            <StatCard icon={Ticket} title="IT Tickets" accent="#ffb020" delay={0.1}>
+              <MiniStat label="Created"  value={data?.tickets_created || 0}  color="#00d4ff" />
+              <MiniStat label="Resolved" value={0} color="#00ff88" />
+              <MiniStat label="Pending"  value={0}  color="#ffb020" />
+            </StatCard>
 
-        <StatCard icon={Ticket} title="IT Tickets" accent="#ffb020" delay={0.1}>
-          <MiniStat label="Open"     value={STATS.tickets.open}     color="#ff3b5c" />
-          <MiniStat label="Resolved" value={STATS.tickets.resolved} color="#00ff88" />
-          <MiniStat label="Pending"  value={STATS.tickets.pending}  color="#ffb020" />
-        </StatCard>
+            <StatCard icon={Lock} title="Password Resets" accent="#00d4ff" delay={0.15}>
+              <MiniStat label="Requested" value={data?.password_resets || 0} color="#00d4ff" />
+              <MiniStat label="Completed" value={0} color="#00ff88" />
+              <MiniStat label="Pending"   value={0} color="#ffb020" />
+            </StatCard>
 
-        <StatCard icon={Lock} title="Password Resets" accent="#00d4ff" delay={0.15}>
-          <MiniStat label="Completed" value={STATS.resets.completed} color="#00ff88" />
-          <MiniStat label="Pending"   value={STATS.resets.pending}   color="#ffb020" />
-          <MiniStat label="Total"     value={STATS.resets.completed + STATS.resets.pending} color="#00d4ff" />
-        </StatCard>
+            <StatCard icon={ShieldAlert} title="Security Incidents" accent="#ff3b5c" delay={0.2}>
+              <MiniStat label="Reported"  value={data?.incidents_reported || 0}  color="#00d4ff" />
+              <MiniStat label="Resolved"  value={0}  color="#00ff88" />
+              <MiniStat label="Escalated" value={0} color="#ff3b5c" />
+            </StatCard>
 
-        <StatCard icon={ShieldAlert} title="Security Incidents" accent="#ff3b5c" delay={0.2}>
-          <MiniStat label="Reported"  value={STATS.incidents.reported}  color="#00d4ff" />
-          <MiniStat label="Resolved"  value={STATS.incidents.resolved}  color="#00ff88" />
-          <MiniStat label="Escalated" value={STATS.incidents.escalated} color="#ff3b5c" />
-        </StatCard>
-
-        <StatCard icon={BookOpen} title="Training Progress" accent="#7850ff" delay={0.25}>
-          <MiniStat label="Videos"  value={STATS.training.completed} color="#7850ff" />
-          <MiniStat label="Hours"   value={STATS.training.hours}    color="#00d4ff" suffix="h" />
-          <MiniStat label="Streak"  value={STATS.training.streak}   color="#ffb020" suffix="d" />
-        </StatCard>
+            <StatCard icon={BookOpen} title="Training Progress" accent="#7850ff" delay={0.25}>
+              <MiniStat label="Recommended" value={data?.training_recommendations || 0} color="#00d4ff" />
+              <MiniStat label="Completed"   value={0} color="#00ff88" />
+              <MiniStat label="Hours"       value={0} color="#7850ff" suffix="h" />
+            </StatCard>
+          </>
+        )}
       </div>
 
       {/* ══ CHARTS ROW ═════════════════════════════════════════════════════════ */}
@@ -608,7 +650,7 @@ export default function MyActivityPage() {
               </div>
               <div>
                 <h2 className="text-[14px] font-bold text-white">Recent Activity</h2>
-                <p className="text-[10px] text-white/30 mt-0.5">Your last {RECENT_ACTIVITY.length} actions</p>
+                <p className="text-[10px] text-white/30 mt-0.5">Your recent actions</p>
               </div>
             </div>
             <button className="flex items-center gap-1 text-[11px] text-white/30 hover:text-cyan-400 transition-colors font-medium">
@@ -617,16 +659,37 @@ export default function MyActivityPage() {
           </div>
 
           {/* Entries */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
-            {RECENT_ACTIVITY.map((item, i) => (
-              <TimelineEntry
-                key={item.id}
-                item={item}
-                index={i}
-                isLast={i >= RECENT_ACTIVITY.length - 2}
-              />
-            ))}
-          </div>
+          {loading ? (
+             <div className="space-y-4">
+                {[1,2,3].map(i => (
+                  <div key={i} className="flex gap-4 animate-pulse">
+                    <div className="w-7 h-7 rounded-full bg-white/10" />
+                    <div className="flex-1">
+                      <div className="h-3 bg-white/10 rounded w-1/3 mb-2" />
+                      <div className="h-2 bg-white/10 rounded w-1/6" />
+                    </div>
+                  </div>
+                ))}
+             </div>
+          ) : data?.recent_activity?.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+              {data.recent_activity.map((item, i) => {
+                const config = getActivityIcon(item.type)
+                return (
+                  <TimelineEntry
+                    key={i}
+                    item={{ ...item, label: item.title, time: formatTimeAgo(item.date), ...config }}
+                    index={i}
+                    isLast={i >= data.recent_activity.length - 2}
+                  />
+                )
+              })}
+            </div>
+          ) : (
+            <div className="py-8 flex items-center justify-center">
+              <span className="text-sm text-white/40">No activity found.</span>
+            </div>
+          )}
         </GlassCard>
       </motion.div>
 

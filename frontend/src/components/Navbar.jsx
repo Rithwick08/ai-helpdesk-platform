@@ -9,6 +9,7 @@ const routeLabels = {
   '/it-support':          'IT Support',
   '/password-reset':      'Password Reset',
   '/security-awareness':  'Security Training',
+  '/training-management': 'Training Management',
 }
 
 const breadcrumbBase = 'CyberShield AI'

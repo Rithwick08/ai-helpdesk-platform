@@ -34,9 +34,23 @@ class AssistantConversation(Base):
         onupdate=datetime.utcnow
     )
     pending_action = Column(
-    String,
-    nullable=True
+        String,
+        nullable=True
     )
     troubleshooting_attempts = Column(Integer, default=0)
 
     original_problem = Column(String, nullable=True)
+
+    # State-machine workflow state
+    workflow_state = Column(
+        String,
+        default="IDLE",
+        nullable=False,
+        server_default="IDLE"
+    )
+
+    # The pending tool name (e.g. "it_support") held until confirmation
+    pending_tool = Column(String, nullable=True)
+
+    # Structured entities collected during COLLECTING_INFORMATION phase
+    collected_entities = Column(String, nullable=True)  # JSON-encoded

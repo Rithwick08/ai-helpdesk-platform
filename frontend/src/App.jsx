@@ -18,12 +18,21 @@ import EmployeeSecurityPage from './pages/EmployeeSecurityPage'
 import MyActivityPage       from './pages/MyActivityPage'
 
 // Admin / SOC / IT pages
+import AssignedTicketsPage    from './pages/AssignedTicketsPage'
 import Dashboard              from './pages/Dashboard'
 import IncidentPage           from './pages/IncidentPage'
 import ITSupportPage          from './pages/ITSupportPage'
+import KnowledgeBasePage      from './pages/KnowledgeBasePage'
 import PasswordResetPage      from './pages/PasswordResetPage'
 import SOCPage                from './pages/SOCPage'
+import ThreatFeedPage         from './pages/ThreatFeedPage'
+import AnalyticsPage          from './pages/AnalyticsPage'
 import SecurityAwarenessPage  from './pages/SecurityAwarenessPage'
+import TrainingManagementPage from './pages/TrainingManagementPage'
+import SecurityUpdatesPage    from './pages/SecurityUpdatesPage'
+import SettingsPage           from './pages/SettingsPage'
+import UsersPage              from './pages/UsersPage'
+import ITTicketsPage          from './pages/ITTicketsPage'
 // import VoiceAssistantPage     from './pages/VoiceAssistantPage' // No longer used in main routing unless needed
 
 export default function App() {
@@ -40,14 +49,17 @@ export default function App() {
           <Route element={<RoleProtectedRoute allowedRoles={['admin']} />}>
             <Route element={<AdminLayout />}>
               <Route path="/dashboard"          element={<Dashboard />} />
-              <Route path="/users"              element={<Dashboard />} /> {/* Placeholder */}
+              <Route path="/users"              element={<UsersPage />} />
               <Route path="/incidents"          element={<IncidentPage />} />
-              <Route path="/it-tickets"         element={<Dashboard />} /> {/* Placeholder */}
+              <Route path="/it-tickets"         element={<ITTicketsPage />} />
+              <Route path="/my-tickets"         element={<AssignedTicketsPage />} />
+              <Route path="/knowledge-base"     element={<KnowledgeBasePage />} />
+              <Route path="/threat-feed"        element={<ThreatFeedPage />} />
               <Route path="/password-reset"     element={<PasswordResetPage />} />
-              <Route path="/training-management" element={<SecurityAwarenessPage />} />
-              <Route path="/security-updates"   element={<Dashboard />} /> {/* Placeholder */}
-              <Route path="/analytics"          element={<Dashboard />} /> {/* Placeholder */}
-              <Route path="/settings"           element={<Dashboard />} /> {/* Placeholder */}
+              <Route path="/training-management" element={<TrainingManagementPage />} />
+              <Route path="/security-updates"   element={<SecurityUpdatesPage />} />
+              <Route path="/analytics"          element={<AnalyticsPage />} />
+              <Route path="/settings"           element={<SettingsPage />} />
             </Route>
           </Route>
 
