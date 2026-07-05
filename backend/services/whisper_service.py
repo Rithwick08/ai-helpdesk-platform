@@ -1,8 +1,9 @@
 """
 whisper_service.py — Local Whisper transcription using faster-whisper.
 
-Lazy-loads the model on first call so the server starts quickly even if
-the model weights have not been downloaded yet.
+The model singleton is lazy-loaded by default but can be pre-warmed at
+application startup via prewarm_model() to eliminate the cold-start
+penalty on the first voice request.
 
 Model selection (ordered by speed vs accuracy trade-off on a Mac):
   - "tiny"   : ~39M params, fastest, lowest accuracy — good for quick demos
@@ -64,6 +65,23 @@ def _get_model():
     return _model
 
 
+def prewarm_model() -> None:
+    """
+    Eagerly load and warm-up the Whisper model.
+
+    Call this during application startup (e.g. FastAPI lifespan) so the
+    first real voice request experiences zero cold-start delay.
+
+    Safe to call multiple times — subsequent calls are no-ops because the
+    singleton is already initialised.
+    """
+    try:
+        _get_model()
+        logger.info("[WHISPER] Model preloaded successfully.")
+    except Exception as exc:
+        logger.error("[WHISPER] Pre-warm failed: %s", exc)
+
+
 def transcribe_audio(audio_bytes: bytes, content_type: str = "audio/webm") -> Optional[str]:
     """
     Transcribe raw audio bytes to text.
@@ -105,7 +123,7 @@ def transcribe_audio(audio_bytes: bytes, content_type: str = "audio/webm") -> Op
         segments, info = model.transcribe(
             tmp_path,
             language=WHISPER_LANGUAGE,
-            beam_size=5,
+            beam_size=1,              # OP-2: beam_size=1 for ~60% faster CPU inference
             vad_filter=True,          # skip silence automatically
             vad_parameters=dict(
                 min_silence_duration_ms=300,

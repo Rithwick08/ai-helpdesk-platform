@@ -42,12 +42,12 @@ RESOLVED_PHRASES = [
     r"^resolved$",
 ]
 
-CANCEL_PHRASES = [
-    r"^cancel$",
-    r"^stop$",
-    r"^abort$",
-    r"never mind$",
-    r"^nevermind$",
+GLOBAL_CANCEL_PHRASES = [
+    r"^cancel[.!?]*$",
+    r"^stop[.!?]*$",
+    r"^abort[.!?]*$",
+    r"never mind[.!?]*$",
+    r"^nevermind[.!?]*$",
     r"forget it",
     r"don.?t (do|continue|proceed)",
     r"do not (do|continue|proceed)",
@@ -56,31 +56,37 @@ CANCEL_PHRASES = [
     r"no,? cancel",
 ]
 
+SOFT_CANCEL_PHRASES = [
+    r"^no[.!?]*$",
+    r"^no thanks[.!?]*$",
+]
+
 # Explicit confirmation words/phrases — checked only when AWAITING_CONFIRMATION
 CONFIRM_PHRASES = [
-    r"^yes+$",           # "yes", "yes yes", "yessss"
-    r"^yeah+$",
-    r"^yep+$",
-    r"^yup+$",
-    r"^sure$",
-    r"^ok(ay)?$",
-    r"^ok(ay)?[,.]? (go ahead|please|sure|do it|proceed)$",
+    r"^yes[.!?]*$",           # "yes", "yes.", "yes!"
+    r"^yes please[.!?]*$",
+    r"^yeah[.!?]*$",
+    r"^yep[.!?]*$",
+    r"^yup[.!?]*$",
+    r"^sure[.!?]*$",
+    r"^ok(ay)?[.!?]*$",
+    r"^ok(ay)?[,.]? (go ahead|please|sure|do it|proceed)[.!?]*$",
     r"go ahead",
-    r"^proceed$",
-    r"^confirm(ed)?$",
+    r"^proceed[.!?]*$",
+    r"^confirm(ed)?[.!?]*$",
     r"create it",
-    r"^do it$",
+    r"^do it[.!?]*$",
     r"create the ticket",
     r"create the incident",
     r"create the request",
     r"reset it",
-    r"^submit$",
-    r"^approve(d)?$",
-    r"^absolutely$",
-    r"^affirmative$",
-    r"^please$",
-    r"^sounds good$",
-    r"^that.?s (correct|fine|good)$",
+    r"^submit[.!?]*$",
+    r"^approve(d)?[.!?]*$",
+    r"^absolutely[.!?]*$",
+    r"^affirmative[.!?]*$",
+    r"^please[.!?]*$",
+    r"^sounds good[.!?]*$",
+    r"^that.?s (correct|fine|good)[.!?]*$",
 ]
 
 
@@ -93,8 +99,16 @@ def is_resolved_without_action(text: str) -> bool:
     return _match_any(text, RESOLVED_PHRASES)
 
 
+def is_global_cancellation(text: str) -> bool:
+    return _match_any(text, GLOBAL_CANCEL_PHRASES)
+
+
+def is_soft_cancellation(text: str) -> bool:
+    return _match_any(text, SOFT_CANCEL_PHRASES)
+
+
 def is_cancellation(text: str) -> bool:
-    return _match_any(text, CANCEL_PHRASES)
+    return is_global_cancellation(text) or is_soft_cancellation(text)
 
 
 def is_confirmation(text: str) -> bool:

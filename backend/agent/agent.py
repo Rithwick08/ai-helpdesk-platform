@@ -33,7 +33,7 @@ logger = logging.getLogger("cyberdesk.agent")
 class CyberDeskAgent:
 
     @staticmethod
-    def run(ai_result, request, conversation, current_user, db):
+    def run(ai_result, request, conversation, current_user, db, perf=None):
         """
         Main entry point. Called once per user message.
         ai_result may be None if the planner short-circuits before the LLM.
@@ -56,48 +56,93 @@ class CyberDeskAgent:
         # ── Route based on planner decision ────────────────────────────────────
 
         if decision.action == "resolved":
-            return CyberDeskAgent._resolved_without_action(conversation, db)
+            res = CyberDeskAgent._resolved_without_action(conversation, db)
+            CyberDeskAgent._debug_log_turn(conversation, memory, decision, res)
+            return res
 
         if decision.action == "cancel":
-            return CyberDeskAgent._cancel(conversation, db)
+            res = CyberDeskAgent._cancel(conversation, db)
+            CyberDeskAgent._debug_log_turn(conversation, memory, decision, res)
+            return res
 
         if decision.action == "confirm":
-            return CyberDeskAgent._execute_tool(
-                decision.tool_name, request, conversation, current_user, db, ai_result or {}
+            res = CyberDeskAgent._execute_tool(
+                decision.tool_name, request, conversation, current_user, db, ai_result or {}, perf=perf
             )
+            CyberDeskAgent._debug_log_turn(conversation, memory, decision, res)
+            return res
 
         if decision.action == "reask_confirmation":
-            return {
+            res = {
                 "status": "waiting",
                 "response": "Just to confirm — should I go ahead? Reply yes to proceed, or say cancel to stop."
             }
+            CyberDeskAgent._debug_log_turn(conversation, memory, decision, res)
+            return res
 
         if decision.action == "tool_loop":
             # Already inside an active tool's troubleshooting loop
-            return CyberDeskAgent._execute_tool(
-                decision.tool_name, request, conversation, current_user, db, ai_result or {}
+            res = CyberDeskAgent._execute_tool(
+                decision.tool_name, request, conversation, current_user, db, ai_result or {}, perf=perf
             )
+            CyberDeskAgent._debug_log_turn(conversation, memory, decision, res)
+            return res
 
         # ── LLM path — process AI recommendation ──────────────────────────────
-        return CyberDeskAgent._handle_llm_result(
-            ai_result, request, conversation, current_user, db, memory
+        res = CyberDeskAgent._handle_llm_result(
+            ai_result, request, conversation, current_user, db, memory, perf=perf
+        )
+        CyberDeskAgent._debug_log_turn(conversation, memory, decision, res)
+        return res
+
+    @staticmethod
+    def _debug_log_turn(conversation, memory, decision, result):
+        logger.info(
+            "\n" + "="*50 + "\n"
+            "Current Workflow State: %s\n"
+            "Pending Tool: %s\n"
+            "Collected Entities: %s\n"
+            "Missing Fields: %s\n"
+            "Planner Decision: %s\n"
+            "Tool Executed: %s\n"
+            "Final Workflow State: %s\n"
+            + "="*50,
+            getattr(conversation, "workflow_state", "IDLE"),
+            conversation.pending_tool,
+            memory.to_json(),
+            memory.missing_for_tool(conversation.pending_tool) if conversation.pending_tool else "N/A",
+            decision.action,
+            "Yes" if getattr(conversation, "workflow_state", "IDLE") == ConversationState.COMPLETED else "No",
+            getattr(conversation, "workflow_state", "IDLE")
         )
 
     # ── LLM result processor ───────────────────────────────────────────────────
 
     @staticmethod
-    def _handle_llm_result(ai_result, request, conversation, current_user, db, memory: WorkflowMemory):
-        recommended_state = ai_result.get("recommended_state", ConversationState.IDLE)
+    def _handle_llm_result(ai_result, request, conversation, current_user, db, memory: WorkflowMemory, perf=None):
         recommended_tool  = ai_result.get("recommended_tool")
         response_text     = ai_result.get("response", "")
         entities          = ai_result.get("entities", {})
 
         logger.info(
-            "[AGENT] llm_recommended_state=%s | recommended_tool=%s | entities=%s",
-            recommended_state,
+            "[AGENT] llm_recommended_tool=%s | entities=%s",
             recommended_tool,
             {k: v for k, v in entities.items() if v is not None},
         )
+
+        tool = recommended_tool
+        if conversation.pending_tool:
+            if tool and tool != conversation.pending_tool:
+                from agent.states import is_cancellation
+                if is_cancellation(request.message) or "instead" in request.message.lower() or "different" in request.message.lower():
+                    logger.info("[AGENT] Explicit workflow switch detected: %s -> %s. Wiping WorkflowMemory.", conversation.pending_tool, tool)
+                    memory = WorkflowMemory()
+                    memory.set("problem", request.message)
+                else:
+                    logger.info("[AGENT] Ignoring hallucinated tool switch: %s -> %s.", conversation.pending_tool, tool)
+                    tool = conversation.pending_tool
+            else:
+                tool = conversation.pending_tool
 
         # Merge newly extracted entities into workflow memory
         memory.merge_entities(entities)
@@ -108,64 +153,55 @@ class CyberDeskAgent:
         if not conversation.original_problem and request.message:
             conversation.original_problem = request.message
 
-        if recommended_state == ConversationState.COLLECTING_INFORMATION:
+        if not tool:
+            # Default: IDLE / chat / general answer
+            conversation.workflow_state = ConversationState.IDLE
+            conversation.collected_entities = memory.to_json()
+            db.commit()
+            return {"status": "chat", "response": response_text or "How can I help you?"}
+
+        # ── State transitions ──────────────────────────────────────────────────
+        if memory.is_ready_for_tool(tool):
+            conversation.collected_entities = memory.to_json()
+
+            # DO NOT ask for generic confirmation for tools that have their own workflows or don't need it.
+            # password_reset is the only tool that expects the generic confirmation intercept.
+            if tool in ["it_support", "security_incident", "security_awareness", "general_question"]:
+                db.commit()
+                return CyberDeskAgent._execute_tool(
+                    tool, request, conversation, current_user, db, ai_result or {}, perf=perf
+                )
+
+            return CyberDeskAgent._ask_for_confirmation(
+                tool, response_text, request, conversation, db, perf=perf
+            )
+        else:
             conversation.workflow_state = ConversationState.COLLECTING_INFORMATION
-            if recommended_tool:
-                conversation.pending_tool = recommended_tool
+            conversation.pending_tool = tool
             conversation.collected_entities = memory.to_json()
 
             logger.info(
                 "[AGENT] COLLECTING | missing_for_tool=%s | completed_steps=%s",
-                memory.missing_for_tool(recommended_tool or ""),
+                memory.missing_for_tool(tool),
                 memory.completed_steps,
             )
 
             db.commit()
             return {"status": "waiting", "response": response_text}
 
-        if recommended_state == ConversationState.READY_TO_EXECUTE and recommended_tool:
-            # Check tool requirements
-            missing = memory.missing_for_tool(recommended_tool)
-            if missing:
-                logger.warning(
-                    "[AGENT] READY_TO_EXECUTE but missing fields %s — staying in COLLECTING",
-                    missing,
-                )
-                conversation.workflow_state = ConversationState.COLLECTING_INFORMATION
-                conversation.pending_tool   = recommended_tool
-                conversation.collected_entities = memory.to_json()
-                db.commit()
-                return {"status": "waiting", "response": response_text}
-
-            conversation.collected_entities = memory.to_json()
-            return CyberDeskAgent._ask_for_confirmation(
-                recommended_tool, response_text, request, conversation, db
-            )
-
-        if recommended_state in (
-            ConversationState.RESOLVED_WITHOUT_ACTION,
-            ConversationState.CANCELLED,
-        ):
-            # LLM detected resolution/cancellation — honour it
-            if recommended_state == ConversationState.RESOLVED_WITHOUT_ACTION:
-                return CyberDeskAgent._resolved_without_action(conversation, db)
-            return CyberDeskAgent._cancel(conversation, db)
-
-        # Default: IDLE / chat / general answer
-        conversation.workflow_state = ConversationState.IDLE
-        conversation.collected_entities = memory.to_json()
-        db.commit()
-        return {"status": "chat", "response": response_text or "How can I help you?"}
-
     # ── Tool execution ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def _execute_tool(tool_name, request, conversation, current_user, db, ai_result):
+    def _execute_tool(tool_name, request, conversation, current_user, db, ai_result, perf=None):
         logger.info("[AGENT] EXECUTING tool=%s", tool_name)
 
         conversation.workflow_state = ConversationState.EXECUTING
         conversation.pending_action = None   # tool sets its own sub-state if needed
         db.commit()
+
+        # ── PERF: tool_start ──────────────────────────────────────────────────
+        if perf is not None:
+            perf.mark("tool_start")
 
         result = ToolExecutor.execute(
             tool_name=tool_name,
@@ -175,6 +211,10 @@ class CyberDeskAgent:
             db=db,
             ai_result=ai_result,
         )
+
+        # ── PERF: tool_end ────────────────────────────────────────────────────
+        if perf is not None:
+            perf.mark("tool_end")
 
         status    = result.get("status", "")
         completed = result.get("completed", False)  # must be explicitly True
@@ -214,7 +254,7 @@ class CyberDeskAgent:
         return result
 
     @staticmethod
-    def _ask_for_confirmation(tool_name, response_text, request, conversation, db):
+    def _ask_for_confirmation(tool_name, response_text, request, conversation, db, perf=None):
         conversation.workflow_state = ConversationState.AWAITING_CONFIRMATION
         conversation.pending_tool   = tool_name
         if not conversation.original_problem:
@@ -223,7 +263,12 @@ class CyberDeskAgent:
 
         logger.info("[AGENT] AWAITING_CONFIRMATION for tool=%s", tool_name)
 
-        prompt = response_text or "I have everything I need. Shall I go ahead?"
+        prompt = response_text
+        if not prompt:
+            prompt = "I have everything I need. Shall I go ahead?"
+        elif not any(q in prompt.lower() for q in ["shall i", "go ahead", "ready to", "do you want me to", "should i", "proceed", "continue"]):
+            prompt = prompt.rstrip() + " Shall I continue?"
+
         return {"status": "waiting", "response": prompt}
 
     # ── Terminal state helpers ─────────────────────────────────────────────────

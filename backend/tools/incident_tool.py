@@ -291,11 +291,7 @@ class IncidentTool:
         severity = memory.incident_severity or "Medium"
         steps    = len(memory.completed_incident_steps)
 
-        summary = (
-            f"I've collected enough information about this {category} incident "
-            f"(Severity: {severity}).\n\n"
-            f"Would you like me to submit a formal Security Incident report to the SOC team?"
-        )
+        summary = "I have gathered the incident details. Would you like me to submit this security incident?"
 
         conversation.pending_action     = "incident_escalate_confirm"
         conversation.collected_entities = memory.to_json()

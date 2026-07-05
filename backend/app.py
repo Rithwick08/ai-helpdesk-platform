@@ -29,7 +29,27 @@ from routes.dashboard import router as dashboard_router
 from routes import training_progress
 
 
-app = FastAPI()
+import asyncio
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan — runs startup tasks, then yields for the app lifetime."""
+    # OP-1: Pre-warm Whisper model in a background thread so the first voice
+    # request does not pay the ~20 s cold-start penalty.
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _prewarm_whisper)
+    yield
+    # (shutdown cleanup can go here if needed)
+
+
+def _prewarm_whisper():
+    from services.whisper_service import prewarm_model
+    prewarm_model()
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

@@ -31,29 +31,7 @@ Current workflow context:
 {workflow_context}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-WORKFLOW STATES — you must recommend exactly ONE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-IDLE
-  No active workflow. Answer general questions directly.
-
-COLLECTING_INFORMATION
-  You need ONE more piece of information before proceeding.
-  Ask ONLY that one question. Never ask multiple questions at once.
-  NEVER ask for info already known from the employee profile.
-
-READY_TO_EXECUTE
-  You have everything needed. Summarise the action and ask for confirmation.
-  Example: "I have everything I need. Shall I create an IT ticket for your VPN issue?"
-
-RESOLVED_WITHOUT_ACTION
-  The user says the issue is resolved. Reply naturally. Do NOT execute any tool.
-
-CANCELLED
-  The user explicitly cancelled. Reply naturally. Do NOT execute any tool.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-AVAILABLE TOOLS (only set recommended_tool when state is READY_TO_EXECUTE)
+AVAILABLE TOOLS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - password_reset       → account_type required
 - it_support           → problem required
@@ -62,23 +40,26 @@ AVAILABLE TOOLS (only set recommended_tool when state is READY_TO_EXECUTE)
 - general_question     → no fields required
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-BEHAVIOUR RULES
+BEHAVIOUR RULES & CONVERSATION GUIDELINES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. NEVER ask for information already known (name, email, role, department).
-2. NEVER execute a tool — only recommend a state and tool name.
-3. NEVER recommend AWAITING_CONFIRMATION — the Python agent handles that automatically.
-4. Keep replies short (1–3 sentences). Professional. No filler phrases.
-5. Ask only ONE question at a time.
-6. Answer general cybersecurity questions directly without any tool.
-7. If completed_steps are listed in the workflow context, NEVER suggest those steps again.
-8. Always move the troubleshooting forward. Never repeat previous advice.
+1. NEVER expose internal tool names to the user.
+2. If you recommend a tool but require more information (e.g., account_type for password_reset), YOUR RESPONSE MUST naturally ask the user for that missing information.
+   Example: "I can help with that. Are you an Employee or a Contractor?"
+3. If you have all the required information for a tool, YOUR RESPONSE MUST summarize the action naturally.
+   Example: "I have everything I need to reset your password."
+4. NEVER ask for information already known (name, email, role, department).
+5. NEVER execute a tool — only recommend a tool name in the JSON.
+6. Keep replies short (1–3 sentences). Professional. No filler phrases.
+7. Ask only ONE question at a time.
+8. Answer general cybersecurity questions directly without any tool.
+9. If completed_steps are listed in the workflow context, NEVER suggest those steps again.
+10. Always move the troubleshooting forward. Never repeat previous advice.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 RETURN FORMAT — valid JSON only, no markdown fences
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 {{
-    "recommended_state": "IDLE",
     "recommended_tool": null,
     "response": "",
     "entities": {{
@@ -92,8 +73,7 @@ RETURN FORMAT — valid JSON only, no markdown fences
 }}
 
 Rules:
-- recommended_tool is ONLY set when recommended_state == "READY_TO_EXECUTE".
-- recommended_tool is null for all other states.
+- recommended_tool is null for general chats.
 - Return JSON only. No explanations, no markdown.
 """
 
@@ -165,14 +145,12 @@ def chat_with_ai(conversation_history, current_user, memory=None):
     except json.JSONDecodeError:
         logger.warning("[LLM] JSON parse error — raw output: %s", result[:200])
         data = {
-            "recommended_state": "IDLE",
             "recommended_tool": None,
             "response": result,
             "entities": {}
         }
 
     # Normalise
-    data.setdefault("recommended_state", "IDLE")
     data.setdefault("recommended_tool", None)
     data.setdefault("response", "")
     data.setdefault("entities", {})
@@ -180,8 +158,7 @@ def chat_with_ai(conversation_history, current_user, memory=None):
         data["entities"].setdefault(field, None)
 
     logger.info(
-        "[LLM] recommended_state=%s | tool=%s | response_preview=%r",
-        data["recommended_state"],
+        "[LLM] recommended_tool=%s | response_preview=%r",
         data["recommended_tool"],
         data["response"][:80],
     )

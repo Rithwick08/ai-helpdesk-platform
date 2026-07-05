@@ -22,7 +22,8 @@ from typing import Optional
 from agent.states import (
     ConversationState,
     is_resolved_without_action,
-    is_cancellation,
+    is_global_cancellation,
+    is_soft_cancellation,
     is_confirmation,
 )
 from agent.workflow_memory import WorkflowMemory
@@ -77,8 +78,8 @@ class Planner:
             logger.info("[PLANNER] → %s (%s)", decision.action, decision.reason)
             return decision
 
-        # ── 2. Cancellation detection (always wins except over resolution) ─────
-        if is_cancellation(user_text):
+        # ── 2. Global Cancellation detection (always wins except over resolution) ─────
+        if is_global_cancellation(user_text):
             decision = PlannerDecision(
                 action="cancel",
                 reason="User explicitly cancelled the workflow",
@@ -87,9 +88,21 @@ class Planner:
             logger.info("[PLANNER] → %s (%s)", decision.action, decision.reason)
             return decision
 
+        # ── 2b. State-aware Soft Cancellation ──────────────────────────────────
+        is_asking_confirmation = (
+            current_state == ConversationState.AWAITING_CONFIRMATION or
+            conversation.pending_action in ["it_escalate_confirm", "incident_escalate_confirm", "password_reset_waiting"]
+        )
+        if is_asking_confirmation and is_soft_cancellation(user_text):
+            decision = PlannerDecision(
+                action="cancel",
+                reason="User declined the confirmation prompt (soft cancellation)",
+                memory=memory,
+            )
+            logger.info("[PLANNER] → %s (%s)", decision.action, decision.reason)
+            return decision
+
         # ── 3. Confirmation interception ───────────────────────────────────────
-        # If we are AWAITING_CONFIRMATION, the reply MUST be intercepted here.
-        # The LLM must NEVER receive confirmation messages.
         if current_state == ConversationState.AWAITING_CONFIRMATION:
             if is_confirmation(user_text):
                 decision = PlannerDecision(
@@ -98,16 +111,28 @@ class Planner:
                     tool_name=conversation.pending_tool,
                     memory=memory,
                 )
+                logger.info("[PLANNER] → %s (%s)", decision.action, decision.reason)
+                return decision
+            elif "?" in user_text or any(q in user_text.lower() for q in ["why ", "how ", "what ", "when ", "who ", "can ", "could "]):
+                # Genuine follow-up question -> let LLM answer it
+                decision = PlannerDecision(
+                    action="llm",
+                    reason="User asked a follow-up question during confirmation",
+                    tool_name=conversation.pending_tool,
+                    memory=memory,
+                )
+                logger.info("[PLANNER] → %s (%s)", decision.action, decision.reason)
+                return decision
             else:
-                # Ambiguous — keep waiting, don't call LLM
+                # Random nonsense -> politely ask for confirmation again
                 decision = PlannerDecision(
                     action="reask_confirmation",
                     reason="Unclear response while awaiting confirmation",
                     tool_name=conversation.pending_tool,
                     memory=memory,
                 )
-            logger.info("[PLANNER] → %s (%s)", decision.action, decision.reason)
-            return decision
+                logger.info("[PLANNER] → %s (%s)", decision.action, decision.reason)
+                return decision
 
         # ── 4. Active tool loop (IT troubleshooting or incident follow-up) ─────
         if conversation.pending_action in (

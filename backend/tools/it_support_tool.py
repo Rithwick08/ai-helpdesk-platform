@@ -106,9 +106,20 @@ def _classify_reply(text: str) -> str:
     return "ambiguous"
 
 
-def _map_category(raw_category: str) -> str:
+def _map_category(raw_category: str, problem: str = "") -> str:
     """Map diagnose_it_issue() category strings to workflow keys."""
-    return CATEGORY_MAP.get(raw_category.lower().strip(), "office")
+    cat = CATEGORY_MAP.get(raw_category.lower().strip(), "office")
+    
+    if problem:
+        problem_lower = problem.lower()
+        vpn_keywords = [
+            "vpn", "forticlient", "globalprotect", "anyconnect", 
+            "cannot connect", "connection timed out", "remote access"
+        ]
+        if any(kw in problem_lower for kw in vpn_keywords):
+            return "vpn"
+            
+    return cat
 
 
 def _first_unfinished_step(category: str, memory: WorkflowMemory) -> Optional[dict]:
@@ -141,27 +152,43 @@ def _step_ids_to_titles(category: str, step_ids: list[str]) -> str:
 
 class ITSupportTool:
 
+    def _is_direct_escalation(self, message: str) -> bool:
+        import string
+        # Convert to lowercase and remove punctuation
+        clean_msg = message.lower().translate(str.maketrans('', '', string.punctuation))
+        # Replace multiple spaces with a single space
+        clean_msg = re.sub(r'\s+', ' ', clean_msg).strip()
+        
+        phrases = [
+            "create a ticket", "open a ticket", "raise a ticket", 
+            "create an it ticket", "just create a ticket", 
+            "skip troubleshooting", "connect me to it", 
+            "connect me to an engineer", "escalate this",
+            "i dont want to troubleshoot", "support ticket", 
+            "human assistance", "assign this to it", "escalate"
+        ]
+        
+        return any(p in clean_msg for p in phrases)
+
     def execute(self, request, conversation, current_user, db, ai_result):
         memory = WorkflowMemory(conversation.collected_entities)
+        
+        # ── Direct Escalation Check (Before anything else) ─────────────────────
+        if self._is_direct_escalation(request.message):
+            logger.info("[IT_SUPPORT] User requested direct escalation (Deterministic)")
+            return self._create_ticket(conversation, db, memory, is_exhausted=False)
 
-        # ── BRANCH A: First call — diagnose and start the workflow ─────────────
-        if conversation.pending_action is None:
-            return self._start_workflow(request, conversation, current_user, db, memory)
-
-        # ── BRANCH B: Escalation confirmed — create ticket immediately ─────────
-        if conversation.pending_action == "it_escalate_confirm":
-            return self._create_ticket(conversation, db, memory)
+        # agent.py clears conversation.pending_action, so we must restore it
+        conversation.pending_action = "it_support"
+        db.commit()
 
         # ── BRANCH C: Continuing the troubleshooting workflow ──────────────────
-        if conversation.pending_action == "it_support":
-            return self._continue_workflow(request, conversation, db, memory)
+        # If memory.current_step is set, we are already in the troubleshooting loop.
+        if memory.current_step:
+            return self._continue_workflow(request, conversation, current_user, db, memory)
 
-        # Fallback (should never reach here)
-        logger.warning("[IT_SUPPORT] Unexpected pending_action=%s", conversation.pending_action)
-        return tool_waiting(
-            "I'm continuing to work on your issue. Can you describe what you're currently seeing?",
-            memory
-        )
+        # ── BRANCH A: First call — diagnose and start the workflow ─────────────
+        return self._start_workflow(request, conversation, current_user, db, memory)
 
     # ── Branch handlers ───────────────────────────────────────────────────────
 
@@ -171,7 +198,7 @@ class ITSupportTool:
         analysis = diagnose_it_issue(problem, current_user)
 
         raw_category = analysis.get("category", "Other")
-        category     = _map_category(raw_category)
+        category     = _map_category(raw_category, problem)
         diagnosis    = analysis.get("diagnosis", "I've identified a potential issue.")
 
         logger.info(
@@ -205,15 +232,12 @@ class ITSupportTool:
                 memory.mark_step_failed(step_id)
 
         # ── Find the first unfinished step (skipping all pre-loaded ones) ──────
-        first_unfinished = self._first_unfinished_step(category, memory)
+        first_unfinished = _first_unfinished_step(category, memory)
 
         if not first_unfinished:
             # Every step was already tried — go straight to escalation offer
             logger.info("[IT_SUPPORT] All steps pre-completed — offering escalation")
-            memory.set_current_step("ESCALATE")
-            conversation.collected_entities = memory.to_json()
-            db.commit()
-            return self._ask_to_escalate(conversation, db, memory)
+            return self._create_ticket(conversation, db, memory, is_exhausted=True)
 
         # Present the first unfinished step
         memory.set_current_step(first_unfinished["id"])
@@ -241,56 +265,86 @@ class ITSupportTool:
         )
         return tool_waiting(reply, memory)
 
-    def _continue_workflow(self, request, conversation, db, memory: WorkflowMemory):
+    def _continue_workflow(self, request, conversation, current_user, db, memory: WorkflowMemory):
         """Subsequent calls: classify reply, advance the workflow graph."""
+        from services.ai_service import classify_troubleshooting_reply
+
         category     = memory.it_category or "office"
         current_step = memory.current_step
         attempts     = conversation.troubleshooting_attempts or 0
-        reply_class  = _classify_reply(request.message)
+        problem      = memory.problem or "IT issue"
+
+        # Direct escalation handled in execute(), but keep this just in case
+        pass
+
+        # Find the text of the current question
+        current = get_step(category, current_step)
+        current_question = current["question"] if current else "No current question."
+        current_title    = current["title"] if current else "Unknown step"
+
+        # Use LLM to classify the intent deterministically
+        classification = classify_troubleshooting_reply(
+            problem=problem,
+            current_step_title=current_title,
+            current_question=current_question,
+            user_reply=request.message
+        )
+        
+        intent = classification.get("intent", "INFORMATION")
 
         logger.info(
             "[IT_SUPPORT] CONTINUE | category=%s | current_step=%s | attempt=%d | "
-            "reply_class=%s | completed=%s | failed=%s",
+            "intent=%s | completed=%s | failed=%s",
             category, current_step, attempts,
-            reply_class, memory.completed_steps, memory.failed_steps,
+            intent, memory.completed_steps, memory.failed_steps,
         )
 
-        # ── Hard escalation request ────────────────────────────────────────────
-        if reply_class == "escalate":
-            logger.info("[IT_SUPPORT] User requested explicit escalation")
-            return self._ask_to_escalate(conversation, db, memory)
+        # ── CANCEL ────────────────────────────────────────────────
+        if intent == "CANCEL":
+            logger.info("[IT_SUPPORT] User requested explicit cancellation")
+            from agent.states import ConversationState
+            conversation.workflow_state     = ConversationState.IDLE
+            conversation.pending_action     = None
+            conversation.pending_tool       = None
+            conversation.collected_entities = None
+            db.commit()
+            return tool_completed("No problem. I’ve cancelled this troubleshooting session. Let me know if you need anything else.")
 
         # ── Safety cap ────────────────────────────────────────────────────────
         if attempts >= MAX_TROUBLESHOOTING_STEPS:
             logger.info("[IT_SUPPORT] Max steps reached — escalating")
-            return self._ask_to_escalate(conversation, db, memory)
+            return self._create_ticket(conversation, db, memory, is_exhausted=True)
 
         # ── No current_step tracked (edge case) ───────────────────────────────
         if not current_step:
             logger.warning("[IT_SUPPORT] No current_step in memory — escalating")
-            return self._ask_to_escalate(conversation, db, memory)
+            return self._create_ticket(conversation, db, memory, is_exhausted=True)
 
         # ── Resolve success or failure ─────────────────────────────────────────
-        if reply_class == "success":
+        if intent == "YES":
             # User says current step worked → navigate success_next
             next_step = get_next_step(category, current_step, success=True)
             logger.info("[IT_SUPPORT] Step %s succeeded → next: %s",
                         current_step, next_step["id"] if next_step else "None")
-        elif reply_class == "failure":
+        elif intent == "NO":
             # User says current step did NOT work → mark as failed, navigate failure_next
             memory.mark_step_failed(current_step)
             next_step = get_next_step(category, current_step, success=False)
             logger.info("[IT_SUPPORT] Step %s failed → next: %s",
                         current_step, next_step["id"] if next_step else "None")
+        elif intent == "QUESTION":
+            reply = f"I'm referring to the '{problem}' issue you reported. To continue troubleshooting:\n{current_question}"
+            conversation.collected_entities = memory.to_json()
+            db.commit()
+            return tool_waiting(reply, memory)
+        elif intent == "INFORMATION":
+            reply = f"Thank you for the additional information. To continue troubleshooting:\n{current_question}"
+            conversation.collected_entities = memory.to_json()
+            db.commit()
+            return tool_waiting(reply, memory)
         else:
-            # Ambiguous reply — re-ask the same step with a clearer prompt
-            current = get_step(category, current_step)
-            question = current["question"] if current else "Let me know if that step worked."
-            reply = (
-                f"I'm not sure I understood — did that step resolve the issue? "
-                f"Please reply with yes if it worked, or no if it didn't.\n\n"
-                f"To remind you of the step:\n{question}"
-            )
+            # Fallback for unexpected intents
+            reply = f"I'm not sure I understood. Please reply with yes if it worked, or no if it didn't.\n\n{current_question}"
             conversation.collected_entities = memory.to_json()
             db.commit()
             return tool_waiting(reply, memory)
@@ -312,7 +366,7 @@ class ITSupportTool:
         # ── Terminal: ESCALATE ─────────────────────────────────────────────────
         if next_step is None or next_step["id"] == "ESCALATE":
             logger.info("[IT_SUPPORT] Workflow reached ESCALATE")
-            return self._ask_to_escalate(conversation, db, memory)
+            return self._create_ticket(conversation, db, memory, is_exhausted=True)
 
         # ── Skip already-completed steps ──────────────────────────────────────
         # The graph guarantees no cycles, but guard anyway
@@ -325,7 +379,7 @@ class ITSupportTool:
                 break
 
         if not next_step or next_step["id"] == "ESCALATE":
-            return self._ask_to_escalate(conversation, db, memory)
+            return self._create_ticket(conversation, db, memory, is_exhausted=True)
         if next_step["id"] == "RESOLVED":
             conversation.pending_action           = None
             conversation.original_problem         = None
@@ -347,7 +401,7 @@ class ITSupportTool:
 
         step_number = len(memory.completed_steps)
         reply = (
-            f"Got it. Let's try the next step ({step_number}):\n\n"
+            f"Step {step_number}:\n"
             f"{next_step['question']}"
         )
         logger.info("[IT_SUPPORT] Presenting step: %s (attempt %d)", next_step["id"], attempts + 1)
@@ -356,28 +410,7 @@ class ITSupportTool:
     # ── Escalation helpers ────────────────────────────────────────────────────
 
     @staticmethod
-    def _ask_to_escalate(conversation, db, memory: WorkflowMemory):
-        """
-        Ask the user for confirmation before creating a ticket.
-        Returns tool_waiting() — the Planner handles the yes/no.
-        """
-        steps_tried = len(memory.completed_steps)
-        summary = (
-            f"I've exhausted the available self-service troubleshooting steps "
-            f"({steps_tried} step{'s' if steps_tried != 1 else ''} tried).\n\n"
-            f"Would you like me to create an IT support ticket so an engineer can assist you?"
-        )
-
-        # Switch pending_action so the next "yes" routes to ticket creation
-        conversation.pending_action   = "it_escalate_confirm"
-        conversation.collected_entities = memory.to_json()
-        db.commit()
-
-        logger.info("[IT_SUPPORT] Asking escalation confirmation | steps_tried=%d", steps_tried)
-        return tool_waiting(summary, memory)
-
-    @staticmethod
-    def _create_ticket(conversation, db, memory: WorkflowMemory):
+    def _create_ticket(conversation, db, memory: WorkflowMemory, is_exhausted: bool = False):
         """
         Create a real ITTicket DB row.
         completed=True is set ONLY here, after db.commit() succeeds.
@@ -421,13 +454,20 @@ class ITSupportTool:
         )
 
         steps_tried = len(memory.completed_steps)
-        reply = (
-            f"IT Ticket #{ticket.id} has been created.\n\n"
-            f"Category: {ticket.category} · Priority: {ticket.priority}\n"
-            f"Steps attempted: {steps_tried}\n\n"
-            f"An IT engineer will review your ticket and contact you at your registered email. "
-            f"You can also track the status in the IT Tickets section."
-        )
+        
+        if is_exhausted:
+            reply = (
+                f"I've exhausted all available troubleshooting steps and the issue still appears unresolved.\n\n"
+                f"I've created an IT Support ticket so one of our engineers can investigate further."
+            )
+        else:
+            reply = (
+                f"IT Ticket #{ticket.id} has been created.\n\n"
+                f"Category: {ticket.category} · Priority: {ticket.priority}\n"
+                f"Steps attempted: {steps_tried}\n\n"
+                f"An IT engineer will review your ticket and contact you at your registered email. "
+                f"You can also track the status in the IT Tickets section."
+            )
 
         action_card = {
             "label":  "IT TICKET CREATED",

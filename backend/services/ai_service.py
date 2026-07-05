@@ -318,6 +318,55 @@ Conversation:
         result = result.replace("```json", "").replace("```", "").strip()
 
     return json.loads(result)
+
+def classify_troubleshooting_reply(problem, current_step_title, current_question, user_reply):
+
+    try:
+        response = client.chat(
+            model=REASONING_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"""
+You are an intent classifier for an IT Support workflow.
+
+Original Issue: "{problem}"
+Current Step: "{current_step_title}"
+Current Question: "{current_question}"
+
+User Reply:
+"{user_reply}"
+
+Classify the user's reply intent into EXACTLY ONE of the following:
+
+- YES: The user explicitly confirmed the problem is resolved, or the step succeeded, or they provided information that directly implies success (e.g., "Google opens now").
+- NO: The user explicitly stated the problem still exists, or the step failed, or they provided information that directly implies failure (e.g., "Still not working").
+- QUESTION: The user is asking for clarification about the current step or issue.
+- INFORMATION: The user is providing additional details or context rather than answering the yes/no question.
+- CANCEL: The user explicitly wants to cancel or stop the troubleshooting workflow (e.g., "cancel", "stop", "never mind").
+
+Return ONLY valid JSON. Do not return explanations, confidence scores, reasoning, or any additional fields.
+
+{{
+    "intent": ""
+}}
+"""
+                }
+            ],
+            temperature=0.0
+        )
+
+        result = response.choices[0].message.content.strip()
+
+        if result.startswith("```json"):
+            result = result.replace("```json", "").replace("```", "").strip()
+
+        return json.loads(result)
+    except Exception as e:
+        print("AI JSON Parse Error (classify_reply):", e)
+        # Fallback
+        return {"intent": "INFORMATION"}
+
 def generate_incident_questions(description, current_user):
 
     response = client.chat(

@@ -10,6 +10,9 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { chatAssistant, transcribeAudio } from '../api/assistant'
+import { voiceSession } from '../api/wsAudio'
+import SpeechService from '../services/SpeechService'
+import VoiceSettingsPanel from '../components/VoiceSettingsPanel'
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 const MicIcon    = ({ cls }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className={cls}><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0014 0M12 19v3M8 22h8"/></svg>
@@ -56,10 +59,12 @@ const STATUS_STYLE = {
 }
 
 // ── Orb ───────────────────────────────────────────────────────────────────────
-// Inspired by the React Bits "Orb" — a large glowing ring with cyan→purple gradient.
-function Orb({ listening, aiTyping, aiSpeaking, onTap }) {
-  // Pulse scale: bigger when listening/processing/speaking
-  const active = listening || aiTyping || aiSpeaking
+// Inspired by the React Bits "Orb" — a large glowing ring with conic gradient.
+function Orb({ voiceState, onTap }) {
+  const listening = voiceState === 'LISTENING'
+  const aiTyping = voiceState === 'PROCESSING'
+  const aiSpeaking = voiceState === 'SPEAKING'
+  const active = voiceState !== 'IDLE'
 
   return (
     <div className="relative flex items-center justify-center select-none"
@@ -226,176 +231,84 @@ export default function AssistantPage() {
     time: 'just now',
   }])
   const [input, setInput]           = useState('')
-  const [listening, setListening]   = useState(false)
-  const [aiTyping, setAiTyping]     = useState(false)
-  const [aiSpeaking, setAiSpeaking] = useState(false)
+  const [voiceState, setVoiceState] = useState('IDLE')
+  const [textChatTyping, setTextChatTyping] = useState(false)
   const [tipIndex, setTipIndex]     = useState(0)
   const [conversationId, setConversationId] = useState(null)
-  
-  const [voiceModeState, setVoiceModeState] = useState(false)
-  const voiceModeRef = useRef(false)
-  const setVoiceMode = (val) => {
-    voiceModeRef.current = val
-    setVoiceModeState(val)
-  }
+  const [showMobileSettings, setShowMobileSettings] = useState(false)
+  const aiTyping = voiceState === 'PROCESSING' || textChatTyping
 
   const chatEndRef                  = useRef(null)
   const inputRef                    = useRef(null)
-  // Whisper voice recording refs (replaces SpeechRecognition)
-  const mediaRecorderRef            = useRef(null)
-  const audioChunksRef              = useRef([])
-  const streamRef                   = useRef(null)
-  const synthRef                    = useRef(window.speechSynthesis)
   const latestSendMessage           = useRef(null)
+  const lastTapRef                  = useRef(0)
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, aiTyping])
+  }, [messages, voiceState, textChatTyping])
 
   useEffect(() => {
     latestSendMessage.current = sendMessage
   })
 
-  // ── Whisper: start recording from microphone ────────────────────────────────
-  async function startRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      streamRef.current   = stream
-      audioChunksRef.current = []
-
-      // Prefer webm/opus (Chrome/Edge); Firefox falls back to ogg/opus
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm')
-          ? 'audio/webm'
-          : 'audio/ogg'
-
-      const recorder = new MediaRecorder(stream, { mimeType })
-      mediaRecorderRef.current = recorder
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data)
-      }
-
-      recorder.onstop = async () => {
-        // Stop mic tracks
-        streamRef.current?.getTracks().forEach(t => t.stop())
-        streamRef.current = null
-        setListening(false)
-
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
-        audioChunksRef.current = []
-
-        if (audioBlob.size < 1000) {
-          // Too short — likely silence
-          if (voiceModeRef.current) {
-            // Re-arm for next utterance
-            startRecording()
-          }
-          return
-        }
-
-        setAiTyping(true)
-        try {
-          const result = await transcribeAudio(audioBlob)
-          if (result.transcript) {
-            latestSendMessage.current(result.transcript)
-          } else {
-            // Whisper returned no text — show friendly error
-            setMessages(prev => [...prev, {
-              id: Date.now(), role: 'ai',
-              text: result.error || "I couldn't understand that. Could you try again?",
-              time: 'just now',
-            }])
-            setAiTyping(false)
-            if (voiceModeRef.current) startRecording()
-          }
-        } catch (err) {
-          console.error('[Whisper] transcription error', err)
-          setMessages(prev => [...prev, {
-            id: Date.now(), role: 'ai',
-            text: "I couldn't understand that. Could you try again?",
-            time: 'just now',
-          }])
-          setAiTyping(false)
-          if (voiceModeRef.current) startRecording()
-        }
-      }
-
-      recorder.start()
-      setListening(true)
-    } catch (err) {
-      console.error('[Whisper] microphone access error', err)
-      setListening(false)
-      setVoiceMode(false)
-      setMessages(prev => [...prev, {
-        id: Date.now(), role: 'ai',
-        text: 'Microphone access denied. Please allow microphone access and try again.',
-        time: 'just now',
-      }])
-    }
-  }
-
-  function stopRecording() {
-    try { mediaRecorderRef.current?.stop() } catch (e) {}
-    // streamRef tracks stopped inside onstop handler
-  }
-
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      synthRef.current?.cancel()
-      stopRecording()
+      voiceSession.deactivate()
     }
   }, [])
 
-  function speakResponse(text, shouldContinueListening) {
-    if (!synthRef.current) return
-    synthRef.current.cancel()
-    
-    setAiSpeaking(true)
-    const cleanText = text.replace(/[#✅•⚠️*]/g, '').replace(/https?:\/\/[^\s]+/g, 'a link')
-    const utterance = new SpeechSynthesisUtterance(cleanText)
-    
-    utterance.onend = () => {
-      setAiSpeaking(false)
-      if (shouldContinueListening && voiceModeRef.current) {
-        // Re-arm the Whisper recorder for the next user utterance
-        startRecording()
-      } else {
-        setVoiceMode(false)
-      }
-    }
-    
-    utterance.onerror = () => {
-       setAiSpeaking(false)
-       setVoiceMode(false)
-    }
-
-    synthRef.current.speak(utterance)
-  }
-
-  function handleOrbTap() {
-    // If currently active — stop everything
-    if (aiSpeaking || listening) {
-      synthRef.current?.cancel()
-      setAiSpeaking(false)
-      setListening(false)
-      setVoiceMode(false)
-      stopRecording()
+  function handleOrbTap(e) {
+    const now = performance.now()
+    if (now - lastTapRef.current < 300) {
+      console.log('[DEBUG-TAP] Ignored duplicate tap within 300ms. Time delta:', now - lastTapRef.current)
       return
     }
+    lastTapRef.current = now
 
-    // Start a new voice session
-    setVoiceMode(true)
-    speakResponse('Hello! How can I help you today?', true)
+    console.log('[DEBUG-TAP] handleOrbTap dispatching ORB_TAP. Event type:', e?.type || 'programmatic')
+
+    const token = localStorage.getItem('access_token')
+    voiceSession.handleOrbTap({
+      token,
+      conversationId,
+      onStateChange: (state) => {
+        setVoiceState(state)
+      },
+      onTranscript: (transcript) => {
+        setMessages(prev => [...prev, {
+          id: crypto.randomUUID(), role: 'user', text: transcript, time: 'just now',
+        }])
+      },
+      onResponse: (payload) => {
+        const responseText = payload.response || "I have completed your request."
+        const actionCard   = extractAction(responseText) ||
+                             (payload.action_card ? payload.action_card : null)
+
+        if (payload.conversation_id) setConversationId(payload.conversation_id)
+
+        setMessages(prev => [...prev, {
+          id: crypto.randomUUID(), role: 'ai',
+          text:   actionCard ? null : responseText,
+          action: actionCard,
+          time:   'just now',
+        }])
+      },
+      onError: (msg) => {
+        setMessages(prev => [...prev, {
+          id: crypto.randomUUID(), role: 'ai', text: msg, time: 'just now',
+        }])
+      },
+      onVadEvent: (event) => {
+        // VAD logging handled by VoiceSessionManager
+      }
+    })
   }
 
   async function sendMessage(text) {
-    if (!text.trim() || aiTyping) return
-    setMessages(prev => [...prev, { id: Date.now(), role: 'user', text: text.trim(), time: 'just now' }])
+    if (!text.trim() || voiceState === 'PROCESSING' || textChatTyping) return
+    setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'user', text: text.trim(), time: 'just now' }])
     setInput('')
-    setAiTyping(true)
+    setTextChatTyping(true)
     
     try {
       const res = await chatAssistant(conversationId, text)
@@ -406,7 +319,7 @@ export default function AssistantPage() {
       const actionCard = extractAction(responseText)
 
       setMessages(prev => [...prev, {
-        id: Date.now(),
+        id: crypto.randomUUID(),
         role: 'ai',
         text: actionCard ? null : responseText,
         action: actionCard,
@@ -416,7 +329,7 @@ export default function AssistantPage() {
       speakResponse(responseText, res.status !== 'completed')
     } catch (err) {
       setMessages(prev => [...prev, {
-        id: Date.now(),
+        id: crypto.randomUUID(),
         role: 'ai',
         text: 'Sorry, I couldn’t reach the AI assistant.',
         action: null,
@@ -465,11 +378,23 @@ export default function AssistantPage() {
           {/* Title */}
           <div className="text-center">
             <p className="text-[11px] tracking-[0.35em] uppercase font-medium text-white/30 mb-1">CyberShield</p>
-            <h1 className="text-2xl font-black text-white tracking-tight">AI Voice Assistant</h1>
+            <div className="flex items-center justify-center gap-3">
+              <h1 className="text-2xl font-black text-white tracking-tight">AI Voice Assistant</h1>
+              <button 
+                onClick={() => setShowMobileSettings(!showMobileSettings)}
+                className="p-1 rounded-lg text-white/30 hover:text-white hover:bg-white/5 transition-colors lg:hidden animate-pulse"
+                title="Voice Settings"
+                aria-label="Voice Settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* Orb */}
-          <Orb listening={listening} aiTyping={aiTyping} aiSpeaking={aiSpeaking} onTap={handleOrbTap} />
+          <Orb voiceState={voiceState} onTap={handleOrbTap} />
 
           {/* Quick action pills */}
           <div className="flex flex-wrap justify-center gap-2 max-w-lg">
@@ -500,6 +425,9 @@ export default function AssistantPage() {
 
         {/* ── RIGHT: Info panel ── */}
         <aside className="hidden lg:flex flex-col gap-4 w-72 xl:w-80 p-5 border-l border-white/5 overflow-y-auto">
+
+          {/* Voice Settings */}
+          <VoiceSettingsPanel />
 
           {/* My Tickets */}
           <div className="rounded-2xl border border-white/8 bg-white/4 overflow-hidden">
@@ -758,6 +686,16 @@ export default function AssistantPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Mobile settings modal overlay */}
+      {showMobileSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={() => setShowMobileSettings(false)}>
+          <div className="w-full max-w-sm animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <VoiceSettingsPanel onClose={() => setShowMobileSettings(false)} />
+          </div>
+        </div>
       )}
     </>
   )
