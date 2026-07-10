@@ -6,11 +6,20 @@ The agent knows exactly what is known, what is missing, and what has been tried.
 
 Transport-independent: no I/O here, just pure data helpers.
 
-IT Support workflow fields (added in Step 3):
-    current_category  — e.g. "outlook", "vpn"
-    current_step      — step ID currently being worked on
-    completed_steps   — list of step IDs already presented
-    failed_steps      — list of step IDs the user said did NOT work
+IT Support workflow fields (v3 — reasoning-driven):
+    it.phase      — None | "active"
+    it.category   — broad category (e.g. "VPN", "Email")
+    it.diagnosis  — initial diagnosis summary
+    it.priority   — initial priority estimate
+    it.facts      — dict of key-value facts extracted by the LLM
+    it.attempted  — list of approach summaries already tried
+
+SOC Incident workflow fields (v3 — reasoning-driven):
+    soc.phase     — None | "collecting"
+    soc.category  — incident category
+    soc.severity  — severity estimate
+    soc.confidence— classifier confidence score
+    soc.evidence  — dict of field_key -> value pairs extracted by the LLM
 """
 import json
 from typing import Optional
@@ -30,33 +39,24 @@ class WorkflowMemory:
     """
     Wraps the JSON blob stored in conversation.collected_entities.
 
-    Full schema:
-    {
-        # ── General fields ─────────────────────────────────────────────────────
-        "problem":           str | null,
-        "account_type":      str | null,
-        "operating_system":  str | null,
-        "device":            str | null,
-        "application":       str | null,
-        "error_message":     str | null,
-        "incident_type":     str | null,
-        "urgency":           str | null,
-        "missing_fields":    list[str],
-        "confidence":        int (0-10),
+    General keys (shared):
+        problem, account_type, operating_system, device, application,
+        error_message, incident_type, urgency, missing_fields, confidence
 
-        # ── IT Support workflow tracking ────────────────────────────────────────
-        "it_category":       str | null,   # classifier output: "outlook", "vpn", etc.
-        "current_step":      str | null,   # step ID currently presented to user
-        "completed_steps":   list[str],    # step IDs presented (success or failure)
-        "failed_steps":      list[str],    # step IDs the user said didn't work
+    IT Support (v3 reasoning-driven):
+        it.phase, it.category, it.diagnosis, it.priority, it.facts, it.attempted
 
-        # ── Security Incident workflow tracking ─────────────────────────────────
-        "incident_category":          str | null,  # e.g. "phishing", "ransomware"
-        "current_incident_step":      str | null,  # step ID currently being worked
-        "completed_incident_steps":   list[str],   # all step IDs presented
-        "failed_incident_steps":      list[str],   # steps user answered 'no' to
-        "incident_severity":          str | null,  # "Low" | "Medium" | "High" | "Critical"
-    }
+    SOC Incident (v3 reasoning-driven):
+        soc.phase, soc.category, soc.severity, soc.confidence, soc.evidence
+
+    Password Reset:
+        pr.phase  (None | "collecting" | "awaiting_confirmation")
+
+    Ticket Memory:
+        ticket_context  (dict containing id, type, category, summary, status, priority)
+
+    All keys accessed via generic .get(key) / .set(key, value).
+    Tool-specific properties are convenience wrappers only.
     """
 
     def __init__(self, raw_json: Optional[str] = None):
@@ -80,18 +80,19 @@ class WorkflowMemory:
         self._data.setdefault("missing_fields",   [])
         self._data.setdefault("confidence",       0)
 
-        # ── IT Support workflow tracking fields ────────────────────────────────
+        # ── IT Support (v3) — reasoning-driven keys ───────────────────────────
+        # Legacy step-graph keys kept for backward compatibility during transition
         self._data.setdefault("it_category",     None)
         self._data.setdefault("current_step",    None)
         self._data.setdefault("completed_steps",  [])
         self._data.setdefault("failed_steps",     [])
+        # New reasoning-driven keys (dot-namespaced, not touched by old code)
+        # it.phase, it.category, it.diagnosis, it.priority, it.facts, it.attempted
+        # soc.phase, soc.category, soc.severity, soc.confidence, soc.evidence
+        # ticket_context
+        # are all set dynamically via .set() — no need for setdefault here
 
-        # ── Security Incident workflow tracking fields ──────────────────────────
-        self._data.setdefault("incident_category",         None)
-        self._data.setdefault("current_incident_step",     None)
-        self._data.setdefault("completed_incident_steps",  [])
-        self._data.setdefault("failed_incident_steps",     [])
-        self._data.setdefault("incident_severity",         None)
+
 
     # ── Generic getters ───────────────────────────────────────────────────────
 
@@ -188,64 +189,7 @@ class WorkflowMemory:
 
     # ── Security Incident workflow getters ────────────────────────────────────
 
-    @property
-    def incident_category(self) -> Optional[str]:
-        """Resolved incident category (e.g. 'phishing', 'ransomware')."""
-        return self._data.get("incident_category")
 
-    @property
-    def current_incident_step(self) -> Optional[str]:
-        """Step ID of the incident-response question currently being asked."""
-        return self._data.get("current_incident_step")
-
-    @property
-    def completed_incident_steps(self) -> list:
-        """All incident-response step IDs that have been presented."""
-        return self._data.get("completed_incident_steps", [])
-
-    @property
-    def failed_incident_steps(self) -> list:
-        """Incident-response step IDs the user answered 'no' to."""
-        return self._data.get("failed_incident_steps", [])
-
-    @property
-    def incident_severity(self) -> Optional[str]:
-        """Severity level: 'Low' | 'Medium' | 'High' | 'Critical'."""
-        return self._data.get("incident_severity")
-
-    # ── Security Incident workflow mutators ───────────────────────────────────
-
-    def set_incident_category(self, category: str):
-        """Store the resolved incident category."""
-        self._data["incident_category"] = category.lower().strip()
-
-    def set_current_incident_step(self, step_id: str):
-        """Mark which incident-response step is currently being worked on."""
-        self._data["current_incident_step"] = step_id
-
-    def set_incident_severity(self, severity: str):
-        """Store the incident severity level."""
-        self._data["incident_severity"] = severity
-
-    def mark_incident_step_completed(self, step_id: str):
-        """Record that an incident-response step has been presented."""
-        normalised = step_id.lower().strip()
-        existing   = [s.lower().strip() for s in self._data.get("completed_incident_steps", [])]
-        if normalised not in existing:
-            self._data.setdefault("completed_incident_steps", []).append(step_id)
-
-    def mark_incident_step_failed(self, step_id: str):
-        """Record that the user answered 'no' to an incident-response step."""
-        normalised = step_id.lower().strip()
-        existing   = [s.lower().strip() for s in self._data.get("failed_incident_steps", [])]
-        if normalised not in existing:
-            self._data.setdefault("failed_incident_steps", []).append(step_id)
-        self.mark_incident_step_completed(step_id)
-
-    def has_completed_incident_step(self, step_id: str) -> bool:
-        """Return True if this incident-response step has already been presented."""
-        normalised = step_id.lower().strip()
-        return normalised in [s.lower().strip() for s in self.completed_incident_steps]
 
     # ── Analysis ──────────────────────────────────────────────────────────────
 
@@ -255,6 +199,22 @@ class WorkflowMemory:
 
     def is_ready_for_tool(self, tool_name: str) -> bool:
         return len(self.missing_for_tool(tool_name)) == 0
+
+    def active_workflow_summary(self, tool_name: str) -> dict:
+        """
+        Returns the complete active workflow context as a single dict.
+        Passed to the reasoning LLM on every turn so it always has full context.
+        Covers both IT Support (it.*) and SOC Incident (soc.*) workflows.
+        """
+        return {
+            "tool": tool_name,
+            "problem": self.get("problem"),
+            "category": self.get("it.category") or self.get("soc.category"),
+            "diagnosis": self.get("it.diagnosis"),
+            "facts": self.get("it.facts") or self.get("soc.evidence") or {},
+            "attempted": self.get("it.attempted") or [],
+            "ticket_context": self.get("ticket_context"),
+        }
 
     # ── Serialisation ─────────────────────────────────────────────────────────
 

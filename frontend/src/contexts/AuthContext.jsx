@@ -27,7 +27,7 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     try {
       // existing backend expects credentials
-      const response = await axios.post('http://localhost:8002/auth/login', {
+      const response = await axios.post(`${import.meta.env.VITE_API_BASE_URL}/auth/login`, {
         email,
         password,
       })

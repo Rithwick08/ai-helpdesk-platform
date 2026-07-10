@@ -1,10 +1,12 @@
 from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
 
 class ChatRequest(BaseModel):
-    conversation_id: int | None = None
+    conversation_id: Optional[int] = None
     message: str
-
-    confirm_action: bool | None = None
+    confirm_action: Optional[bool] = None
+    # Populated server-side before passing to tools — not sent by the client
+    conversation_history: List[Dict[str, Any]] = []
 
 
 class ChatResponse(BaseModel):

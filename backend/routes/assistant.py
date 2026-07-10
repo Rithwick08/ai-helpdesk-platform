@@ -60,43 +60,45 @@ def chat(
     ))
     db.commit()
 
-    # ── 3. Planner pre-flight ──────────────────────────────────────────────────
-    # Load workflow memory before the planner runs
+    # ── 3. Router determines next action ───────────────────────────────────────
+    # Build conversation history for LLM context (if needed by router)
+    history_rows = (
+        db.query(AssistantMessage)
+        .filter(AssistantMessage.conversation_id == conversation.id)
+        .order_by(AssistantMessage.created_at)
+        .all()
+    )
+    conversation_history = [
+        {"role": "assistant" if m.sender == "assistant" else "user", "content": m.message}
+        for m in history_rows
+    ]
+
     memory = WorkflowMemory(conversation.collected_entities)
-    planner_decision = Planner.decide(request.message.strip(), conversation, memory)
+    
+    from agent.router import Router
+    decision_dict, memory = Router.determine_tool(
+        user_text=request.message.strip(),
+        conversation=conversation,
+        memory=memory,
+        current_user=current_user,
+        conversation_history=conversation_history
+    )
 
-    # ── 4. Decide whether to call the LLM ─────────────────────────────────────
-    # The LLM is SKIPPED for deterministic decisions.
-    LLM_REQUIRED_ACTIONS = {"llm"}
+    logger.info(
+        "[ROUTE] Router decision: action=%s | tool=%s",
+        decision_dict.get("action"),
+        decision_dict.get("tool_name"),
+    )
 
-    if planner_decision.action in LLM_REQUIRED_ACTIONS:
-        # Build conversation history for LLM context
-        history_rows = (
-            db.query(AssistantMessage)
-            .filter(AssistantMessage.conversation_id == conversation.id)
-            .order_by(AssistantMessage.created_at)
-            .all()
-        )
-        conversation_history = [
-            {"role": "assistant" if m.sender == "assistant" else "user", "content": m.message}
-            for m in history_rows
-        ]
-        ai_result = chat_with_ai(conversation_history, current_user, memory=memory)
-        logger.info(
-            "[ROUTE] LLM result: state=%s | tool=%s",
-            ai_result.get("recommended_state"),
-            ai_result.get("recommended_tool"),
-        )
-    else:
-        # Short-circuit — no LLM call needed
-        ai_result = None
-        logger.info("[ROUTE] LLM skipped — planner action=%s", planner_decision.action)
+    # Attach conversation history to the request so tools can access it
+    request.conversation_history = conversation_history
 
-    # ── 5. Run agent ───────────────────────────────────────────────────────────
+    # ── 4. Run agent ───────────────────────────────────────────────────────────
     agent_result = CyberDeskAgent.run(
-        ai_result=ai_result,
+        decision_dict=decision_dict,
         request=request,
         conversation=conversation,
+        memory=memory,
         current_user=current_user,
         db=db,
     )

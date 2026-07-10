@@ -105,7 +105,7 @@ function _speak(text, onEnd, onError) {
 
   if (settings.voiceName) {
     const voices = synth.getVoices()
-    const matchingVoice = voices.find(v => v.name === settings.voiceName)
+    const matchingVoice = voices.find(v => v.voiceURI === settings.voiceName)
     if (matchingVoice) {
       utterance.voice = matchingVoice
     }

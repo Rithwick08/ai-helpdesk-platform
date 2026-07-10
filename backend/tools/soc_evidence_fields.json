@@ -1,0 +1,410 @@
+{
+  "_comment": "SOC Evidence Field Definitions — edit this file to add/remove categories or fields without touching Python code.",
+
+  "_validators": {
+    "email":    "Checks for @ and a domain portion",
+    "boolean":  "Accepts yes/no/true/false/y/n",
+    "datetime": "Accepts any non-trivial date/time description (3+ chars)",
+    "text":     "Accepts any non-empty string (2+ chars)",
+    "number":   "Accepts digits optionally followed by units"
+  },
+
+  "_safety_messages": {
+    "phishing":           "⚠️ **Safety Advice:** If you have not already done so, avoid clicking any further links or opening attachments in the suspicious email while we gather the incident details.",
+    "malware":            "⚠️ **Containment Advice:** If possible, disconnect the affected device from the network immediately, but do **not** power it off. This helps contain the threat while preserving evidence.",
+    "ransomware":         "⚠️ **Containment Advice:** Disconnect the affected device from the network immediately. Do **not** reboot or attempt to modify encrypted files while we collect the incident information.",
+    "account_compromise": "⚠️ **Safety Advice:** If you still have access to the account, avoid making any further changes until we finish collecting the incident details.",
+    "suspicious_login":   "⚠️ **Safety Advice:** Do not attempt to log in or recover the account until we have documented all details — this preserves the audit trail.",
+    "data_loss":          "⚠️ **Safety Advice:** Do not delete or modify any emails, files, or logs related to this incident. Preserve all evidence as-is.",
+    "usb_device":         "⚠️ **Safety Advice:** If the USB device is still connected, safely eject it immediately. Do not run any further files from it or plug it into another device.",
+    "insider_threat":     "⚠️ **Safety Advice:** Do **not** confront or alert the individual you suspect, and do not alter or delete any logs or files related to this activity. This is critical for the investigation.",
+    "device_theft":       "⚠️ **Safety Advice:** If the device is organisation-managed, do not attempt any remote actions yet. We will coordinate with IT to initiate a remote wipe after this incident is logged.",
+    "unknown":            "⚠️ **Note:** We will document the details of this security concern and route it to the appropriate team."
+  },
+
+  "phishing": {
+    "fields": [
+      {
+        "key":       "sender_email",
+        "label":     "Sender Email",
+        "question":  "What was the sender's email address in the suspicious email?",
+        "validator": "email",
+        "required":  true
+      },
+      {
+        "key":       "clicked_link",
+        "label":     "Clicked a Link",
+        "question":  "Did you click any link inside the suspicious email? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "entered_credentials",
+        "label":     "Entered Credentials",
+        "question":  "On any page that opened, did you enter a username, password, or any other credentials? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "downloaded_attachment",
+        "label":     "Downloaded Attachment",
+        "question":  "Did you open or download any attachment from the email? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "incident_time",
+        "label":     "When It Happened",
+        "question":  "Approximately when did you receive or interact with this email? (e.g. 'today at 2pm', 'yesterday morning')",
+        "validator": "datetime",
+        "required":  true
+      }
+    ]
+  },
+
+  "malware": {
+    "fields": [
+      {
+        "key":       "device_name",
+        "label":     "Affected Device",
+        "question":  "What is the name or description of the affected device? (e.g. 'my work laptop', 'DESKTOP-XYZ')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "threat_name",
+        "label":     "Threat / Alert Name",
+        "question":  "Did your antivirus or security software display an alert? If so, what name or description did it show? (If no alert, type 'none')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "network_connected",
+        "label":     "Network Connected",
+        "question":  "Is the affected device currently connected to the company network? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "files_affected",
+        "label":     "Files Affected",
+        "question":  "Are any files missing, corrupted, renamed, or inaccessible on the device? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "incident_time",
+        "label":     "When It Happened",
+        "question":  "Approximately when did you first notice the issue?",
+        "validator": "datetime",
+        "required":  true
+      }
+    ]
+  },
+
+  "ransomware": {
+    "fields": [
+      {
+        "key":       "device_name",
+        "label":     "Affected Device",
+        "question":  "What is the name or description of the affected device?",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "files_encrypted",
+        "label":     "Files Encrypted",
+        "question":  "Are your files showing strange extensions (e.g. .locked, .encrypted) or are you seeing a ransom note? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "ransom_demand",
+        "label":     "Ransom Demand",
+        "question":  "Did the ransom note or message specify a payment amount or method? If yes, describe it briefly. If no, type 'no'.",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "shared_drives_affected",
+        "label":     "Shared Drives Affected",
+        "question":  "Were any shared network drives or folders also encrypted or affected? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "network_connected",
+        "label":     "Network Connected at Time",
+        "question":  "Was the device connected to the company network when the encryption began? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "incident_time",
+        "label":     "When It Happened",
+        "question":  "Approximately when did you first discover the encrypted files or ransom note?",
+        "validator": "datetime",
+        "required":  true
+      }
+    ]
+  },
+
+  "account_compromise": {
+    "fields": [
+      {
+        "key":       "account_type",
+        "label":     "Account Type",
+        "question":  "Which account was compromised? (e.g. 'corporate email', 'Microsoft 365', 'VPN account', 'Slack')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "still_has_access",
+        "label":     "Still Has Access",
+        "question":  "Can you still log into the compromised account right now? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "unauthorized_actions",
+        "label":     "Observed Unauthorized Actions",
+        "question":  "What unauthorized activity did you notice? (e.g. 'emails sent I didn\\'t write', 'password changed', 'unknown logins in activity log')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "password_changed",
+        "label":     "Password Already Changed",
+        "question":  "Have you already changed the account password? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "incident_time",
+        "label":     "When Noticed",
+        "question":  "When did you first notice the unauthorized activity?",
+        "validator": "datetime",
+        "required":  true
+      }
+    ]
+  },
+
+  "suspicious_login": {
+    "fields": [
+      {
+        "key":       "account_type",
+        "label":     "Account",
+        "question":  "Which account received the suspicious login alert? (e.g. 'corporate email', 'Microsoft 365')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "login_location",
+        "label":     "Login Location / IP",
+        "question":  "What location, country, or IP address was shown in the alert?",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "login_time",
+        "label":     "Login Time",
+        "question":  "What date and time did the suspicious login occur according to the alert?",
+        "validator": "datetime",
+        "required":  true
+      },
+      {
+        "key":       "login_yours",
+        "label":     "Login Was Yours",
+        "question":  "Could this login have been made by you — for example, were you travelling or using a different device? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "still_has_access",
+        "label":     "Account Still Accessible",
+        "question":  "Can you still log into the account right now? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      }
+    ]
+  },
+
+  "data_loss": {
+    "fields": [
+      {
+        "key":       "data_description",
+        "label":     "Data Description",
+        "question":  "What type of data was lost or exposed? (e.g. 'customer PII', 'financial records', 'HR files', 'source code')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "sensitivity",
+        "label":     "Data Sensitivity",
+        "question":  "How sensitive is this data? (e.g. 'confidential', 'internal only', 'public', 'PII/GDPR regulated')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "recipient",
+        "label":     "Recipient",
+        "question":  "Who received or has access to the exposed data? (e.g. 'external client', 'wrong internal team', 'unknown')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "external_or_internal",
+        "label":     "Internal or External",
+        "question":  "Was the data sent or exposed to someone outside the organisation? (yes for external, no for internal)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "incident_time",
+        "label":     "When It Happened",
+        "question":  "When did this data exposure occur?",
+        "validator": "datetime",
+        "required":  true
+      }
+    ]
+  },
+
+  "usb_device": {
+    "fields": [
+      {
+        "key":       "usb_description",
+        "label":     "Device Description",
+        "question":  "Can you describe the USB device? (e.g. 'black USB stick', 'found in the car park', 'unknown brand')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "usb_inserted",
+        "label":     "Was USB Inserted",
+        "question":  "Was the USB device inserted into a company computer? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "files_executed",
+        "label":     "Files Executed",
+        "question":  "After inserting the USB, did any program launch automatically, or did you open or run any files from it? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "device_location",
+        "label":     "Current Device Location",
+        "question":  "Where is the USB device now? (e.g. 'still in my laptop', 'on my desk', 'handed to IT')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "incident_time",
+        "label":     "When It Was Found / Used",
+        "question":  "When did you find or first use this USB device?",
+        "validator": "datetime",
+        "required":  true
+      }
+    ]
+  },
+
+  "insider_threat": {
+    "fields": [
+      {
+        "key":       "observed_activity",
+        "label":     "Observed Activity",
+        "question":  "Without naming the individual yet, what specific activity did you observe that raised concern? (e.g. 'accessing files outside their department', 'copying data to a USB', 'forwarding emails externally')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "timeframe",
+        "label":     "Timeframe",
+        "question":  "When did you first observe this activity? Please provide an approximate date and time.",
+        "validator": "datetime",
+        "required":  true
+      },
+      {
+        "key":       "evidence_available",
+        "label":     "Evidence Available",
+        "question":  "Do you have any evidence of this activity — such as screenshots, access logs, or email trails? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "data_exfiltrated",
+        "label":     "Data Exfiltrated",
+        "question":  "To your knowledge, has any sensitive data, customer information, or company assets been removed or copied? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      }
+    ]
+  },
+
+  "device_theft": {
+    "fields": [
+      {
+        "key":       "device_type",
+        "label":     "Device Type",
+        "question":  "What type of device was stolen or lost? (e.g. 'company laptop', 'personal phone with company data', 'tablet')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "theft_or_loss",
+        "label":     "Theft or Loss",
+        "question":  "Was the device stolen (taken by someone), or was it simply lost? (stolen or lost)",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "encryption_enabled",
+        "label":     "Disk Encryption",
+        "question":  "Was full-disk encryption enabled on the device? (e.g. BitLocker, FileVault) — yes, no, or unknown",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "police_reported",
+        "label":     "Police Report Filed",
+        "question":  "Have you already filed a police report? (yes or no)",
+        "validator": "boolean",
+        "required":  true
+      },
+      {
+        "key":       "incident_time",
+        "label":     "When It Happened",
+        "question":  "When did the theft or loss occur?",
+        "validator": "datetime",
+        "required":  true
+      }
+    ]
+  },
+
+  "unknown": {
+    "fields": [
+      {
+        "key":       "incident_description",
+        "label":     "Incident Description",
+        "question":  "Please describe the security concern in as much detail as possible. What happened, when, and what systems or data were involved?",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "systems_affected",
+        "label":     "Systems Affected",
+        "question":  "Which systems, applications, or accounts are involved? (e.g. 'my laptop', 'email account', 'shared drive')",
+        "validator": "text",
+        "required":  true
+      },
+      {
+        "key":       "incident_time",
+        "label":     "When It Happened",
+        "question":  "When did you first notice this issue?",
+        "validator": "datetime",
+        "required":  true
+      }
+    ]
+  }
+}

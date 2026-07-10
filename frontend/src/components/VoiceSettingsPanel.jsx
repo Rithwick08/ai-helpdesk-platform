@@ -93,7 +93,7 @@ export default function VoiceSettingsPanel({ onClose }) {
             style={{ colorScheme: 'dark' }}>
             <option value="">Default System Voice</option>
             {voices.map(voice => (
-              <option key={voice.name} value={voice.name}>
+              <option key={voice.voiceURI} value={voice.voiceURI}>
                 {voice.name} ({voice.lang})
               </option>
             ))}

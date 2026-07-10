@@ -155,11 +155,33 @@ function Orb({ voiceState, onTap }) {
 
 // ── Action Card (inside chat) ─────────────────────────────────────────────────
 function ActionCard({ label, detail, status }) {
-  const s = {
+  let s = {
     success:  { bg: 'rgba(0,255,136,0.08)',  border: 'rgba(0,255,136,0.2)',  text: '#00ff88', Icon: CheckIcon  },
     pending:  { bg: 'rgba(255,176,32,0.08)', border: 'rgba(255,176,32,0.2)', text: '#ffb020', Icon: ClockIcon  },
     critical: { bg: 'rgba(255,59,92,0.08)',  border: 'rgba(255,59,92,0.2)',  text: '#ff3b5c', Icon: AlertIcon  },
   }[status] || { bg: 'rgba(0,255,136,0.08)', border: 'rgba(0,255,136,0.2)', text: '#00ff88', Icon: CheckIcon }
+
+  if (label === 'IT TICKET CREATED') {
+    const catMatch = detail.match(/Category:\s*([A-Za-z0-9 ]+) ·/i)
+    const cat = catMatch ? catMatch[1].toLowerCase() : ''
+    
+    if (cat.includes('vpn') || cat.includes('network')) {
+      s = { bg: 'rgba(0,212,255,0.08)', border: 'rgba(0,212,255,0.2)', text: '#00d4ff', Icon: TicketIcon } // Cyan
+    } else if (cat.includes('outlook') || cat.includes('email') || cat.includes('office') || cat.includes('teams')) {
+      s = { bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.2)', text: '#a855f7', Icon: TicketIcon } // Purple
+    } else if (cat.includes('windows') || cat.includes('hardware')) {
+      s = { bg: 'rgba(255,176,32,0.08)', border: 'rgba(255,176,32,0.2)', text: '#ffb020', Icon: TicketIcon } // Amber
+    } else if (cat.includes('printer')) {
+      s = { bg: 'rgba(244,114,182,0.08)', border: 'rgba(244,114,182,0.2)', text: '#f472b6', Icon: TicketIcon } // Pink
+    } else {
+      s = { bg: 'rgba(148,163,184,0.08)', border: 'rgba(148,163,184,0.2)', text: '#94a3b8', Icon: TicketIcon } // Slate
+    }
+  } else if (label?.includes('PASSWORD RESET')) {
+    s = { bg: 'rgba(0,212,255,0.08)', border: 'rgba(0,212,255,0.2)', text: '#00d4ff', Icon: LockIcon } // Cyan
+  } else if (label === 'SECURITY INCIDENT CREATED') {
+    s = { bg: 'rgba(255,59,92,0.08)', border: 'rgba(255,59,92,0.2)', text: '#ff3b5c', Icon: AlertIcon } // Red
+  }
+
   const Icon = s.Icon
   return (
     <div className="mt-2 p-3 rounded-xl text-[11px]"
@@ -176,7 +198,7 @@ function ActionCard({ label, detail, status }) {
 function extractAction(text) {
   if (!text) return null;
 
-  const prMatch = text.match(/Password Reset Request #(\d+)/i);
+  const prMatch = text.match(/Request ID: PR-(\d+)/i) || text.match(/Password Reset Request #(\d+)/i);
   if (prMatch) {
     return {
       label: 'PASSWORD RESET INITIATED',
@@ -194,7 +216,7 @@ function extractAction(text) {
     };
   }
 
-  const tktMatch = text.match(/Ticket ID: (\d+)/i);
+  const tktMatch = text.match(/IT Ticket #(\d+)/i) || text.match(/Ticket ID: (\d+)/i);
   if (tktMatch) {
     return {
       label: 'IT TICKET CREATED',
@@ -316,7 +338,7 @@ export default function AssistantPage() {
         setConversationId(res.conversation_id)
       }
       const responseText = res.response || res.message || 'I have completed your request.'
-      const actionCard = extractAction(responseText)
+      const actionCard = extractAction(responseText) || (res.action_card ? res.action_card : null)
 
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
@@ -326,7 +348,7 @@ export default function AssistantPage() {
         time: 'just now',
       }])
 
-      speakResponse(responseText, res.status !== 'completed')
+      SpeechService.play(responseText)
     } catch (err) {
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
@@ -335,9 +357,9 @@ export default function AssistantPage() {
         action: null,
         time: 'just now',
       }])
-      setVoiceMode(false)
+      setVoiceState('IDLE')
     } finally {
-      setAiTyping(false)
+      setTextChatTyping(false)
     }
   }
 

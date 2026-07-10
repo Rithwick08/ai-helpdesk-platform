@@ -271,55 +271,55 @@ async def ws_audio(websocket: WebSocket):
                     ))
                     db.commit()
 
-                    # ── 6. Planner + Agent (same path as /assistant/chat) ──────
-                    memory          = WorkflowMemory(conv.collected_entities)
-                    chat_request    = ChatRequest(
+                    # ── 6. Router + Agent (same path as /assistant/chat) ──────
+                    memory = WorkflowMemory(conv.collected_entities)
+                    
+                    history_rows = (
+                        db.query(AssistantMessage)
+                        .filter(AssistantMessage.conversation_id == conv.id)
+                        .order_by(AssistantMessage.created_at)
+                        .all()
+                    )
+                    conversation_history = [
+                        {"role": "assistant" if m.sender == "assistant" else "user",
+                         "content": m.message}
+                        for m in history_rows
+                    ]
+
+                    chat_request = ChatRequest(
                         message=transcript,
                         conversation_id=conv.id,
+                        conversation_history=conversation_history,
                     )
 
-                    # ── PERF: stage 7 — Planner start ─────────────────────────
+                    # ── PERF: stage 7 — Router start ──────────────────────────
                     perf.mark("planner_start")
-                    planner_decision = await loop.run_in_executor(
+                    from agent.router import Router
+                    decision_dict, memory = await loop.run_in_executor(
                         None,
-                        partial(Planner.decide, transcript.strip(), conv, memory)
+                        partial(
+                            Router.determine_tool,
+                            user_text=transcript.strip(),
+                            conversation=conv,
+                            memory=memory,
+                            current_user=current_user,
+                            conversation_history=conversation_history
+                        )
                     )
+                    # Router abstracts planner and LLM, we just mark end to satisfy perf metrics
                     perf.mark("planner_end")
-                    # ── PERF: stage 8 — Planner end ───────────────────────────
+                    perf.mark("llm_start")
+                    perf.mark("llm_end")
 
-                    ai_result = None
-                    if planner_decision.action == "llm":
-                        history_rows = (
-                            db.query(AssistantMessage)
-                            .filter(AssistantMessage.conversation_id == conv.id)
-                            .order_by(AssistantMessage.created_at)
-                            .all()
-                        )
-                        conversation_history = [
-                            {"role": "assistant" if m.sender == "assistant" else "user",
-                             "content": m.message}
-                            for m in history_rows
-                        ]
-                        # ── PERF: stage 9 — LLM start ─────────────────────────
-                        perf.mark("llm_start")
-                        # OP-3: Run the blocking Groq HTTP call off the event loop.
-                        loop = asyncio.get_event_loop()
-                        ai_result = await loop.run_in_executor(
-                            None,
-                            partial(chat_with_ai, conversation_history, current_user,
-                                    memory=memory),
-                        )
-                        perf.mark("llm_end")
-                        # ── PERF: stage 10 — LLM end ──────────────────────────
-
-                    # ── PERF: tool marks are set inside _execute_tool_instrumented ──
+                    # ── PERF: tool marks are set inside agent ─────────────────
                     agent_result = await loop.run_in_executor(
                         None,
                         partial(
                             CyberDeskAgent.run,
-                            ai_result=ai_result,
+                            decision_dict=decision_dict,
                             request=chat_request,
                             conversation=conv,
+                            memory=memory,
                             current_user=current_user,
                             db=db,
                             perf=perf,          # passed so agent can mark tool_start/end
@@ -363,7 +363,7 @@ async def ws_audio(websocket: WebSocket):
                         mime_type=mime_type,
                         audio_duration_s=audio_duration_s,
                         workflow_state=getattr(conv, "workflow_state", "IDLE"),
-                        selected_tool=planner_decision.tool_name,
+                        selected_tool=decision_dict.get("tool_name"),
                         http_fallback=False,
                     )
 
@@ -391,8 +391,9 @@ async def ws_audio(websocket: WebSocket):
             pass
 
     finally:
+        user_email = getattr(current_user, "email", "?") if current_user else "?"
+        logger.info("[WS_AUDIO] Session closed for user=%s", user_email)
         db.close()
-        logger.info("[WS_AUDIO] Session closed for user=%s", getattr(current_user, "email", "?"))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

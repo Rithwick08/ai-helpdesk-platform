@@ -12,7 +12,7 @@ export default defineConfig({
     proxy: {
       // WebSocket streaming audio → FastAPI
       '/ws': {
-        target: 'ws://localhost:8002',
+        target: 'ws://localhost:8000',
         ws: true,
         rewriteWsOrigin: true,
       },

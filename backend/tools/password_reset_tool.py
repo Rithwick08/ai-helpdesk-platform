@@ -33,9 +33,12 @@ class PasswordResetTool:
             or conversation.summary
         )
 
+        phase = memory.get("pr.phase")
+
         # ── Missing account_type: ask for it ──────────────────────────────────
         if not account_type:
-            conversation.pending_action = "password_reset_waiting"
+            memory.set("pr.phase", "collecting")
+            conversation.collected_entities = memory.to_json()
             db.commit()
             logger.info("[PASSWORD_RESET] Waiting for account type")
             return tool_waiting(
@@ -45,14 +48,45 @@ class PasswordResetTool:
             )
 
         # ── Collect account_type from follow-up message ───────────────────────
-        if conversation.pending_action == "password_reset_waiting":
-            # User's message is the account type
+        if phase == "collecting":
             account_type = request.message.strip() or "company account"
             memory.set("account_type", account_type)
+            # Proceed to confirmation below
+        
+        # ── Handle Confirmation Phase ──────────────────────────────────────────
+        if phase == "awaiting_confirmation":
+            msg = request.message.strip().lower()
+            
+            # Note: Planner might have already classified this, but we parse here 
+            # to fulfill the internal confirmation contract.
+            confirm_words = ["yes", "yes.", "yes please", "sure", "okay", "proceed"]
+            cancel_words = ["no", "cancel", "stop", "never mind"]
+            
+            if msg in cancel_words:
+                memory.set("pr.phase", None)
+                conversation.collected_entities = memory.to_json()
+                db.commit()
+                return {"status": "cancelled", "response": "Password reset cancelled."}
+                
+            if msg not in confirm_words:
+                return {
+                    "status": "waiting_confirmation",
+                    "response": f"I didn't quite catch that. Shall I create a password reset request for your {account_type} account?"
+                }
+            
+            # User confirmed, fall through to creation
+        else:
+            # First time hitting confirmation phase
+            memory.set("pr.phase", "awaiting_confirmation")
             conversation.collected_entities = memory.to_json()
             db.commit()
+            logger.info("[PASSWORD_RESET] Asking for confirmation")
+            return {
+                "status": "waiting_confirmation",
+                "response": f"I will create a password reset request for your {account_type} account. Shall I go ahead?",
+            }
 
-        # ── Create the real reset record ──────────────────────────────────────
+        # ── Create the real reset record (after confirmation) ─────────────────
         reset = PasswordReset(
             employee_id=current_user.employee_id,
             account_type=account_type,
@@ -67,6 +101,8 @@ class PasswordResetTool:
 
         conversation.pending_action = None
         conversation.summary        = None
+        memory.set("pr.phase", None)
+        conversation.collected_entities = memory.to_json()
         db.commit()
 
         logger.info(

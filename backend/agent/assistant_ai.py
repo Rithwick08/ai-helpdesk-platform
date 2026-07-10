@@ -15,6 +15,7 @@ import logging
 
 from services.ai_client import client
 from config.ai_config import CHAT_MODEL
+from services.ai_service import get_user_friendly_error
 
 logger = logging.getLogger("cyberdesk.llm")
 
@@ -38,6 +39,74 @@ AVAILABLE TOOLS
 - security_incident    → problem required
 - security_awareness   → no fields required
 - general_question     → no fields required
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOOL SELECTION RULES — FOLLOW EXACTLY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+RULE 1 — security_incident ALWAYS wins over it_support for ANY security threat.
+
+Use security_incident for ANY of these topics:
+  • Malware, virus, trojan, spyware, adware, ransomware, worm
+  • Phishing email, suspicious email, fake login page
+  • Ransomware, encrypted files, ransom note
+  • Suspicious login, unknown login, account compromise, unauthorized access
+  • Stolen device, lost laptop, lost phone with company data
+  • Credential theft, entered password on wrong site, credentials exposed
+  • Data breach, data leak, confidential data shared
+  • Insider threat, suspicious colleague activity
+  • Malicious attachment, infected USB, unknown USB device
+  • Hacked account, someone else logged into my account
+  • Security alert from antivirus or EDR
+
+Examples → security_incident:
+  "I think my computer has a virus." → security_incident
+  "My laptop might have malware." → security_incident
+  "I received a phishing email." → security_incident
+  "My files are encrypted and there's a ransom note." → security_incident
+  "Someone logged into my account from another country." → security_incident
+  "I accidentally typed my password into a fake website." → security_incident
+  "My laptop was stolen." → security_incident
+  "I found a USB drive in the car park and plugged it in." → security_incident
+  "My antivirus showed a threat alert." → security_incident
+
+RULE 2 — Use it_support ONLY for genuine technical/hardware/software problems
+         with NO security threat involved.
+
+Examples → it_support:
+  "My Outlook won't open." → it_support
+  "My VPN keeps disconnecting." → it_support
+  "The printer is not working." → it_support
+  "My Wi-Fi is slow." → it_support
+  "Teams microphone isn't detected." → it_support
+  "I can't install an application." → it_support
+  "My monitor has no signal." → it_support
+  "My keyboard is not responding." → it_support
+
+RULE 3 — Use password_reset ONLY for explicit account/password reset requests
+         with NO security incident involved.
+
+RULE 4 — If a message contains any security threat keyword
+         (malware, virus, ransomware, phishing, hacked, stolen, encrypted files,
+          suspicious login, unauthorized access, credential theft, data breach),
+         you MUST return security_incident. Do NOT return it_support.
+
+RULE 5 — When in doubt between it_support and security_incident,
+         always prefer security_incident.
+
+RULE 6 — When the user asks a general cybersecurity or IT knowledge question, 
+         answer it directly and DO NOT recommend any tool (set recommended_tool to null).
+         These are informational questions only. Do NOT trigger workflows or tickets.
+         
+         Examples → general_question (recommended_tool = null):
+           "How do I keep my computer secure?"
+           "What is phishing?"
+           "How do I create a strong password?"
+           "What is malware?"
+           "What is a VPN?"
+           "What should I do if I receive a suspicious email?"
+
+RULE 7 — If the user asks for information about an existing ticket (e.g. "what is my ticket status?", "who is handling it?") OR asks to create a ticket ("Create a ticket") AND there is an "Active Ticket Details" block in the workflow context, answer their question naturally using that ticket data or explain that a ticket already exists, and DO NOT recommend any tool (set recommended_tool to null). Only recommend a tool if they are clearly reporting a completely new, separate problem.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 BEHAVIOUR RULES & CONVERSATION GUIDELINES
@@ -97,6 +166,12 @@ def _build_workflow_context(memory) -> str:
     if memory.completed_steps:
         lines.append(f"Already tried (DO NOT suggest these again): {', '.join(memory.completed_steps)}")
 
+    if memory.get("ticket_context"):
+        ctx = memory.get("ticket_context")
+        lines.append(f"\nActive Ticket Details:")
+        for k, v in ctx.items():
+            lines.append(f"- {k}: {v}")
+
     return "\n".join(lines) if lines else "No active workflow."
 
 
@@ -124,29 +199,32 @@ def chat_with_ai(conversation_history, current_user, memory=None):
         workflow_context[:100],
     )
 
-    response = client.chat(
-        model=CHAT_MODEL,
-        messages=messages,
-        temperature=0.2
-    )
-
-    result = response.choices[0].message.content.strip()
-
-    # Strip accidental markdown fences
-    if result.startswith("```"):
-        parts = result.split("```")
-        result = parts[1] if len(parts) > 1 else result
-        if result.startswith("json"):
-            result = result[4:]
-        result = result.strip()
-
     try:
+        response = client.chat(
+            model=CHAT_MODEL,
+            messages=messages,
+            temperature=0.2
+        )
+
+        result = response.choices[0].message.content.strip()
+
+        # Extract JSON robustly, even if the model prepends conversational text
+        import re
+        json_match = re.search(r'\{.*\}', result, re.DOTALL)
+        if json_match:
+            result = json_match.group(0).strip()
+        else:
+            # Fallback if no {} found at all, just in case
+            result = result.strip()
+            
         data = json.loads(result)
-    except json.JSONDecodeError:
-        logger.warning("[LLM] JSON parse error — raw output: %s", result[:200])
+
+    except Exception as e:
+        logger.error("[LLM] Exception: %s - %s", e.__class__.__name__, str(e))
+        user_msg = get_user_friendly_error(e)
         data = {
             "recommended_tool": None,
-            "response": result,
+            "response": user_msg,
             "entities": {}
         }
 

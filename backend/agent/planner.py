@@ -91,7 +91,7 @@ class Planner:
         # ── 2b. State-aware Soft Cancellation ──────────────────────────────────
         is_asking_confirmation = (
             current_state == ConversationState.AWAITING_CONFIRMATION or
-            conversation.pending_action in ["it_escalate_confirm", "incident_escalate_confirm", "password_reset_waiting"]
+            conversation.pending_action in ["password_reset_waiting"]
         )
         if is_asking_confirmation and is_soft_cancellation(user_text):
             decision = PlannerDecision(
@@ -136,16 +136,12 @@ class Planner:
 
         # ── 4. Active tool loop (IT troubleshooting or incident follow-up) ─────
         if conversation.pending_action in (
-            "it_support", "security_incident",
-            "password_reset_waiting", "it_escalate_confirm",
-            "incident_escalate_confirm",
+            "it_support", "security_incident", "password_reset_waiting"
         ):
             tool_map = {
                 "it_support":               "it_support",
                 "security_incident":        "security_incident",
                 "password_reset_waiting":   "password_reset",
-                "it_escalate_confirm":      "it_support",           # → _create_ticket
-                "incident_escalate_confirm":"security_incident",    # → _create_incident
             }
             tool = tool_map.get(conversation.pending_action, conversation.pending_action)
             decision = PlannerDecision(
