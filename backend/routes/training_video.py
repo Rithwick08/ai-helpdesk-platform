@@ -11,21 +11,18 @@ from schemas.training_video import (
 )
 
 router = APIRouter(
-    tags=["Training Videos"],
-    dependencies=[
-        Depends(require_roles(["admin"]))
-    ]
+    tags=["Training Videos"]
 )
 
 
-@router.get("/training-videos")
+@router.get("/training-videos", dependencies=[Depends(require_roles(["admin", "employee", "it_support"]))])
 def get_training_videos(
     db: Session = Depends(get_db)
 ):
     return db.query(TrainingVideo).all()
 
 
-@router.post("/training-videos")
+@router.post("/training-videos", dependencies=[Depends(require_roles(["admin"]))])
 def create_training_video(
     video: TrainingVideoCreate,
     db: Session = Depends(get_db)
@@ -45,7 +42,7 @@ def create_training_video(
     return new_video
 
 
-@router.put("/training-videos/{video_id}")
+@router.put("/training-videos/{video_id}", dependencies=[Depends(require_roles(["admin"]))])
 def update_training_video(
     video_id: int,
     video: TrainingVideoUpdate,
@@ -75,7 +72,7 @@ def update_training_video(
     return training_video
 
 
-@router.delete("/training-videos/{video_id}")
+@router.delete("/training-videos/{video_id}", dependencies=[Depends(require_roles(["admin"]))])
 def delete_training_video(
     video_id: int,
     db: Session = Depends(get_db)

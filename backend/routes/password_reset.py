@@ -17,7 +17,7 @@ router = APIRouter()
 
 @router.get("/password-resets")
 def get_password_resets(
-    current_user: User = Depends(require_roles(["admin", "it", "soc"])),
+    current_user: User = Depends(require_roles(["admin", "it", "soc", "employee"])),
     db: Session = Depends(get_db)
 ):
     return db.query(PasswordReset).all()

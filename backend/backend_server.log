@@ -5961,3 +5961,10 @@ Final Workflow State: COLLECTING_INFORMATION
 17:04:03 | INFO    | cyberdesk.ws_audio | [WS_AUDIO] WebSocket disconnected by client gracefully.
 17:04:03 | INFO    | cyberdesk.ws_audio | [WS_AUDIO] Session closed for user=admin@cybershield.ai
 INFO:     connection closed
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [10205]
+INFO:     Stopping reloader process [6643]
+/opt/anaconda3/lib/python3.13/multiprocessing/resource_tracker.py:324: UserWarning: resource_tracker: There appear to be 27 leaked semaphore objects to clean up at shutdown: {'/mp-mcy9dfpa', '/mp-bb6l1khk', '/mp-4_puvkeg', '/mp-1h6ohikp', '/mp-_w13vx92', '/mp-97bemc62', '/mp-3z9w0wa4', '/mp-zxepiuze', '/mp-izx8xi0y', '/mp-gcuu87x3', '/mp-o5vb6f1e', '/mp-xomhba6m', '/mp-yza3c2x5', '/mp-znetdbf8', '/mp-znb67t5a', '/mp-l2efnyyq', '/mp-svu29iqn', '/mp-s1bbiuey', '/mp-9eh2bkzz', '/mp-9h534p_b', '/mp-c8eyg8ic', '/mp-aay896ox', '/mp-mopcvf8x', '/mp-7cu24yir', '/mp-n6eh6reu', '/mp-7dt0twga', '/mp-7hsdrcw7'}
+  warnings.warn(

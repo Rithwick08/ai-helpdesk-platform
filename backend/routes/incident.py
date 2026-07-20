@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends
 router = APIRouter(
     tags=["SOC Alerts"],
     dependencies=[
-        Depends(require_roles(["admin", "soc"]))
+        Depends(require_roles(["admin", "soc", "employee"]))
     ]
 )
 @router.get("/incidents")
