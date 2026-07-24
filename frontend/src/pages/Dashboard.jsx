@@ -403,7 +403,7 @@ export default function Dashboard() {
 
       </div>
 
-      {/* ── SECTION 4 & 5: QUICK ACTIONS AND SYSTEM STATUS ── */}
+      {/* ── SECTION 4, 5 & 6: QUICK ACTIONS, SYSTEM STATUS & VOICE ASSISTANT ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Quick Actions */}

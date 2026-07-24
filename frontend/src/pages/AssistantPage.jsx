@@ -13,6 +13,7 @@ import { chatAssistant, transcribeAudio } from '../api/assistant'
 import { voiceSession } from '../api/wsAudio'
 import SpeechService from '../services/SpeechService'
 import VoiceSettingsPanel from '../components/VoiceSettingsPanel'
+import { requestOutboundCall } from '../api/telephony'
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 const MicIcon    = ({ cls }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className={cls}><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0014 0M12 19v3M8 22h8"/></svg>
@@ -369,6 +370,30 @@ export default function AssistantPage() {
 
   const unread = 0 // could track new ai messages while chat closed
 
+  // ── Outbound Phone Call ──────────────────────────────────────────────────────
+  const [callState, setCallState] = useState('idle') // idle | calling | success | error
+  const [callMessage, setCallMessage] = useState('')
+
+  const handleCallIT = async () => {
+    setCallState('calling')
+    setCallMessage('')
+    try {
+      const result = await requestOutboundCall()
+      if (result.success) {
+        setCallState('success')
+        setCallMessage('Your phone is ringing.')
+      } else {
+        setCallState('error')
+        setCallMessage(result.message || 'Unable to place call.')
+      }
+    } catch (err) {
+      setCallState('error')
+      setCallMessage(err.message || 'Unable to place call.')
+    } finally {
+      setTimeout(() => { setCallState('idle'); setCallMessage('') }, 6000)
+    }
+  }
+
   return (
     <>
       {/* ── Global orb keyframe ── */}
@@ -450,6 +475,57 @@ export default function AssistantPage() {
 
           {/* Voice Settings */}
           <VoiceSettingsPanel />
+
+          {/* ── Call IT Assistant card ── */}
+          <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-600/10 to-cyan-500/5 overflow-hidden">
+            <div className="px-4 py-3 border-b border-violet-500/10 flex items-center gap-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-4 h-4 text-violet-400 flex-shrink-0">
+                <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/>
+              </svg>
+              <span className="text-xs font-bold text-white">AI Phone Call</span>
+              <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 bg-violet-500/20 text-violet-400 border border-violet-500/25 rounded-full uppercase tracking-widest">Live</span>
+            </div>
+            <div className="px-4 py-3 flex flex-col gap-3">
+              <p className="text-[11px] text-white/50 leading-relaxed">
+                Get spoken help from CyberShield AI. Your phone will ring.
+              </p>
+
+              {callState === 'success' && (
+                <p className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1.5">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-3 h-3"><polyline points="20 6 9 17 4 12"/></svg>
+                  {callMessage}
+                </p>
+              )}
+              {callState === 'error' && (
+                <p className="text-[11px] text-red-400 font-semibold">{callMessage}</p>
+              )}
+
+              <button
+                id="call-it-assistant-btn"
+                onClick={handleCallIT}
+                disabled={callState === 'calling'}
+                className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold text-xs transition-all ${
+                  callState === 'calling'
+                    ? 'bg-violet-500/20 text-violet-300/60 cursor-not-allowed'
+                    : callState === 'success'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : callState === 'error'
+                    ? 'bg-red-500/15 text-red-300 border border-red-500/25'
+                    : 'bg-gradient-to-r from-violet-600 to-cyan-500 text-white hover:opacity-90 hover:scale-[1.02] shadow-[0_0_15px_rgba(139,92,246,0.3)]'
+                }`}
+              >
+                {callState === 'calling' ? (
+                  <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5 animate-spin"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" opacity=".3"/><path d="M21 12a9 9 0 00-9-9"/></svg> Calling...</>
+                ) : callState === 'success' ? (
+                  <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-3.5 h-3.5"><polyline points="20 6 9 17 4 12"/></svg> Ringing!</>
+                ) : (
+                  <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                    <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 015.19 15.9a19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/>
+                  </svg> Call IT Assistant</>
+                )}
+              </button>
+            </div>
+          </div>
 
           {/* My Tickets */}
           <div className="rounded-2xl border border-white/8 bg-white/4 overflow-hidden">

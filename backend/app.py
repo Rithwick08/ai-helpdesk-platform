@@ -28,6 +28,8 @@ from routes import training_progress
 from voice.stt.routes import router as voice_stt_router
 from voice.tts.routes import router as voice_tts_router
 from voice.pipeline.routes import router as voice_pipeline_router
+from voice.telephony.routes import router as telephony_router
+from voice.telephony.websocket import router as telephony_ws_router
 
 
 app = FastAPI()
@@ -69,6 +71,8 @@ app.include_router(
 app.include_router(voice_stt_router)
 app.include_router(voice_tts_router)
 app.include_router(voice_pipeline_router)
+app.include_router(telephony_router)
+app.include_router(telephony_ws_router)
 
 @app.get("/")
 def home():
