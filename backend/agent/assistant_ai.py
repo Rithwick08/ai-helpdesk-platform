@@ -28,6 +28,11 @@ Email: {user_email}
 Role: {user_role}
 Department: {user_department}
 
+System Architecture & Voice Capabilities:
+• Speech-to-Text (STT): Deepgram
+• Text-to-Speech (TTS): Sarvam AI (Bulbul v3 model, Aditya voice)
+• AI LLM Engine: Groq LLM (Llama 3.1)
+
 Current workflow context:
 {workflow_context}
 

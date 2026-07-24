@@ -16,8 +16,6 @@ from routes.it_ticket import router as it_ticket_router
 from models.ticket_history import TicketHistory
 from routes.auth import router as auth_router
 from routes.assistant import router as assistant_router
-from routes.transcribe import router as transcribe_router
-from routes.ws_audio import router as ws_audio_router
 from routes.training import router as training_router
 from routes.training_video import (
     router as training_video_router
@@ -27,29 +25,12 @@ from routes.security_update import (
 )
 from routes.dashboard import router as dashboard_router
 from routes import training_progress
+from voice.stt.routes import router as voice_stt_router
+from voice.tts.routes import router as voice_tts_router
+from voice.pipeline.routes import router as voice_pipeline_router
 
 
-import asyncio
-from contextlib import asynccontextmanager
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan — runs startup tasks, then yields for the app lifetime."""
-    # OP-1: Pre-warm Whisper model in a background thread so the first voice
-    # request does not pay the ~20 s cold-start penalty.
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(None, _prewarm_whisper)
-    yield
-    # (shutdown cleanup can go here if needed)
-
-
-def _prewarm_whisper():
-    from services.whisper_service import prewarm_model
-    prewarm_model()
-
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,6 +38,15 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[
+        "X-Transcript",
+        "X-Response-Text",
+        "X-Conversation-Id",
+        "X-Agent-Status",
+        "X-Session-Id",
+        "X-Turn-Number",
+        "Content-Disposition",
+    ],
 )
 
 app.include_router(alert_router)
@@ -66,8 +56,6 @@ app.include_router(password_reset_router)
 app.include_router(it_ticket_router)
 app.include_router(auth_router)
 app.include_router(assistant_router)
-app.include_router(transcribe_router)
-app.include_router(ws_audio_router)
 app.include_router(training_router)
 app.include_router(training_video_router)
 app.include_router(
@@ -78,6 +66,10 @@ app.include_router(dashboard_router)
 app.include_router(
     training_progress.router
 )
+app.include_router(voice_stt_router)
+app.include_router(voice_tts_router)
+app.include_router(voice_pipeline_router)
+
 @app.get("/")
 def home():
     return {"message": "Backend Working"}

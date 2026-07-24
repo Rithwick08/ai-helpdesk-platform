@@ -1,35 +1,10 @@
 /**
  * SpeechService.js — Centralized speech playback service.
  *
- * All TTS playback in the application goes through this singleton.
- * Components never call window.speechSynthesis directly.
- *
- * Features
- * --------
- *  - play(text)        — Cancel any current speech, then speak `text`.
- *  - stop()            — Cancel current speech immediately.
- *  - isSpeaking()      — Returns true if speech is currently playing.
- *  - onFinished(fn)    — Register a callback for when speech ends or is stopped.
- *  - offFinished(fn)   — Remove a previously registered callback.
- *
- * Future TTS providers (ElevenLabs, Azure TTS, Google TTS, etc.)
- * only need to replace the internal _speak() implementation.
- * The public API stays identical.
- *
- * Usage
- * -----
- *   import SpeechService from '../services/SpeechService'
- *
- *   SpeechService.onFinished(({ interrupted }) => {
- *     if (!interrupted) startRecording()
- *   })
- *
- *   SpeechService.play('Hello, how can I help you today?')
- *   SpeechService.stop()      // barge-in: cancels immediately
- *   SpeechService.isSpeaking() // → boolean
+ * Supports playing high-quality synthesized audio URLs (e.g., Sarvam AI TTS)
+ * directly via HTML5 Audio, with smooth fallback to browser Web Speech API.
  */
 
-// ── Text cleaning ─────────────────────────────────────────────────────────────
 const CLEAN_RE  = /[#✅•⚠️*_~`]/g
 const LINK_RE   = /https?:\/\/\S+/g
 
@@ -41,13 +16,15 @@ function _cleanText(raw) {
 }
 
 // ── Internal state ────────────────────────────────────────────────────────────
-let _speaking    = false
-let _interrupted = false
-const _listeners = new Set()   // Set<function>
+let _speaking     = false
+let _interrupted  = false
+let _currentAudio = null
+const _listeners  = new Set()   // Set<function>
 
 function _notifyFinished(interrupted) {
   _speaking    = false
   _interrupted = false
+  _currentAudio = null
   for (const fn of _listeners) {
     try { fn({ interrupted }) } catch (e) { console.error('[SpeechService] listener error', e) }
   }
@@ -92,12 +69,14 @@ function getVoices() {
   return window.speechSynthesis.getVoices()
 }
 
-// ── Provider — browser Web Speech API (replaceable) ──────────────────────────
 function _speak(text, onEnd, onError) {
-  const synth    = window.speechSynthesis
+  if (!window.speechSynthesis) {
+    onEnd()
+    return
+  }
+  const synth     = window.speechSynthesis
   const utterance = new SpeechSynthesisUtterance(text)
 
-  // Apply active voice settings
   const settings = getSettings()
   utterance.rate = settings.speed
   utterance.pitch = settings.pitch
@@ -112,16 +91,12 @@ function _speak(text, onEnd, onError) {
   }
 
   utterance.onend = () => {
-    performance.mark('speech_end')
-    try { performance.measure('speech_duration', 'speech_start', 'speech_end') } catch {}
     onEnd()
   }
 
   utterance.onerror = (e) => {
-    // 'interrupted' is the expected error when stop() is called mid-speech.
-    // Treat it as an intentional stop, not a failure.
     if (e.error === 'interrupted' || e.error === 'canceled') {
-      onEnd()   // still fires the finished callback so callers can re-arm
+      onEnd()
     } else {
       onError(e)
     }
@@ -130,85 +105,91 @@ function _speak(text, onEnd, onError) {
   synth.speak(utterance)
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
 /**
- * Stop any current speech and speak `text`.
- * Calls all onFinished listeners when playback ends.
+ * Play speech. If audioUrl (e.g. from Sarvam AI TTS) is provided,
+ * play via HTML5 Audio. Otherwise fall back to Web Speech API.
  *
- * @param {string} text  - Raw text (markdown / URLs cleaned automatically)
+ * @param {string} text
+ * @param {string|null} audioUrl
  */
-function play(text) {
-  if (!window.speechSynthesis) return
-
-  // Cancel any in-flight speech without triggering the "interrupted" path
-  // in callers — we handle it internally.
+function play(text, audioUrl = null) {
+  stop()
   _interrupted = false
-  window.speechSynthesis.cancel()
   _speaking = true
 
+  // Option A: Play synthesized audio URL (Sarvam AI TTS)
+  if (audioUrl) {
+    try {
+      const audio = new Audio(audioUrl)
+      _currentAudio = audio
+      audio.onended = () => {
+        _notifyFinished(_interrupted)
+      }
+      audio.onerror = (e) => {
+        console.error('[SpeechService] Sarvam Audio playback error:', e)
+        _notifyFinished(true)
+      }
+      audio.play().catch(err => {
+        console.error('[SpeechService] Audio element play failed:', err)
+        _notifyFinished(true)
+      })
+      return
+    } catch (err) {
+      console.error('[SpeechService] Failed to initialize HTML5 Audio:', err)
+    }
+  }
+
+  // Option B: Browser Web Speech API fallback
   const cleaned = _cleanText(text)
   if (!cleaned) {
-    // Nothing to say — still fire finished so callers re-arm correctly
     _notifyFinished(false)
     return
   }
 
   _speak(
     cleaned,
-    () => _notifyFinished(_interrupted),    // onEnd
+    () => _notifyFinished(_interrupted),
     (e) => {
       console.error('[SpeechService] speech error', e)
-      _notifyFinished(true)                 // treat unrecoverable errors as interrupted
+      _notifyFinished(true)
     },
   )
 }
 
 /**
- * Immediately cancel ongoing speech.
- * Marks the finish event as "interrupted" so listeners can distinguish
- * a user barge-in from natural speech completion.
+ * Immediately cancel ongoing speech (barge-in / user tap).
  */
 function stop() {
-  if (!window.speechSynthesis) return
   _interrupted = true
-  window.speechSynthesis.cancel()
-  // _notifyFinished will be called by utterance.onerror / utterance.onend
-  // If for some reason neither fires (e.g., nothing was playing), notify now.
+  if (_currentAudio) {
+    try {
+      _currentAudio.pause()
+      _currentAudio.currentTime = 0
+    } catch {}
+    _currentAudio = null
+  }
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel()
+  }
   if (_speaking) {
-    // Give the browser one event-loop tick to fire onerror/onend
     setTimeout(() => {
       if (_speaking) _notifyFinished(true)
     }, 50)
   }
 }
 
-/**
- * Returns true if speech is currently playing.
- */
 function isSpeaking() {
   return _speaking
 }
 
-/**
- * Register a callback to be called when speech finishes or is interrupted.
- * Callback signature: ({ interrupted: boolean }) => void
- *  - interrupted: true  → speech was cancelled mid-way (barge-in, stop())
- *  - interrupted: false → speech completed naturally
- */
 function onFinished(fn) {
   _listeners.add(fn)
 }
 
-/**
- * Remove a previously registered onFinished listener.
- */
 function offFinished(fn) {
   _listeners.delete(fn)
 }
 
-// ── Singleton export ──────────────────────────────────────────────────────────
 const SpeechService = { play, stop, isSpeaking, onFinished, offFinished, getSettings, saveSettings, getVoices }
 
 export default SpeechService
-
