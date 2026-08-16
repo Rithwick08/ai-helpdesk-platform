@@ -119,13 +119,20 @@ def wav_to_twilio_mulaw(
 
     try:
         # Try reading as WAV file first
-        try:
+        if audio_bytes.startswith(b"RIFF"):
             with wave.open(io.BytesIO(audio_bytes), "rb") as wf:
                 channels = wf.getnchannels()
                 sample_width = wf.getsampwidth()
                 rate = wf.getframerate()
                 pcm_data = wf.readframes(wf.getnframes())
-        except Exception:
+        else:
+            import os
+            # If it's not a WAV, check if we requested native mulaw from Sarvam
+            codec = os.getenv("SARVAM_AUDIO_CODEC", "wav").lower()
+            if codec == "mulaw":
+                # It's already native 8-bit mu-law, no conversion needed!
+                return audio_bytes
+            
             # Fallback: treat as raw 16-bit 22.05kHz PCM
             channels = 1
             sample_width = PIPELINE_SAMPLE_WIDTH

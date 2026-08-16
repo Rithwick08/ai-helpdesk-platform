@@ -208,11 +208,13 @@ def _run_assistant_chat(
 
 async def process_voice_request(
     *,
-    audio_file: UploadFile,
+    audio_file: Optional[UploadFile],
     current_user: User,
     db: Session,
     conversation_id: Optional[int] = None,
     session: Optional[VoiceSession] = None,
+    transcript: Optional[str] = None,
+    stt_ms: int = 0,
 ) -> VoiceResponse:
     """
     Full voice pipeline: Audio → STT → AI → TTS → Audio.
@@ -220,9 +222,12 @@ async def process_voice_request(
     This is the single public entry-point.  Routes call this function;
     it orchestrates the three stages and returns a typed VoiceResponse.
 
+    If transcript is provided (e.g. from streaming STT), the STT step is skipped
+    and audio_file is not used for transcription.
+
     Parameters
     ----------
-    audio_file : UploadFile
+    audio_file : UploadFile | None
         The raw audio file from the multipart form upload.
     current_user : User
         The authenticated CyberShield AI user.
@@ -232,6 +237,10 @@ async def process_voice_request(
         Continue an existing conversation, or None to start fresh.
     session : VoiceSession | None
         Existing voice session for latency tracking, or None to create one.
+    transcript : str | None
+        Optional transcript from streaming STT.
+    stt_ms : int
+        Optional STT processing time overhead.
 
     Returns
     -------
@@ -254,32 +263,38 @@ async def process_voice_request(
         current_user.email,
         session.session_id[:8],
         conversation_id,
-        audio_file.filename,
+        audio_file.filename if audio_file else "None",
     )
 
     # ── Stage 1: Deepgram STT ──────────────────────────────────────────────────
     logger.info("[PIPELINE] Stage 1/3 — STT (Deepgram)")
-    t0 = time.monotonic()
-    try:
-        transcript = await transcribe_audio(audio_file)
-    except HTTPException as exc:
-        logger.error(
-            "[PIPELINE] STT failed | status=%s | detail=%s",
-            exc.status_code, exc.detail,
-        )
-        raise STTError(
-            message=f"Speech-to-text failed: {exc.detail}",
-            http_status=exc.status_code,
-        ) from exc
-    except Exception as exc:
-        logger.error("[PIPELINE] STT unexpected error: %s", exc, exc_info=True)
-        raise STTError("Speech-to-text failed due to an unexpected error.") from exc
+    
+    if transcript is not None:
+        logger.info("[PIPELINE] STT Skipped (Using Streaming) | chars=%d | latency=%dms", len(transcript), stt_ms)
+    else:
+        t0 = time.monotonic()
+        try:
+            if not audio_file:
+                raise HTTPException(status_code=400, detail="No audio file or transcript provided")
+            transcript = await transcribe_audio(audio_file)
+        except HTTPException as exc:
+            logger.error(
+                "[PIPELINE] STT failed | status=%s | detail=%s",
+                exc.status_code, exc.detail,
+            )
+            raise STTError(
+                message=f"Speech-to-text failed: {exc.detail}",
+                http_status=exc.status_code,
+            ) from exc
+        except Exception as exc:
+            logger.error("[PIPELINE] STT unexpected error: %s", exc, exc_info=True)
+            raise STTError("Speech-to-text failed due to an unexpected error.") from exc
 
-    stt_ms = int((time.monotonic() - t0) * 1000)
-    logger.info(
-        "[PIPELINE] STT OK | chars=%d | latency=%dms | transcript=%r",
-        len(transcript), stt_ms, transcript[:80],
-    )
+        stt_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(
+            "[PIPELINE] STT OK | chars=%d | latency=%dms | transcript=%r",
+            len(transcript), stt_ms, transcript[:80],
+        )
 
     # ── Stage 2: CyberShield AI Agent ─────────────────────────────────────────
     logger.info("[PIPELINE] Stage 2/3 — AI (CyberDeskAgent)")

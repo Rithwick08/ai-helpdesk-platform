@@ -25,6 +25,7 @@ from agent.states import (
     is_global_cancellation,
     is_soft_cancellation,
     is_confirmation,
+    is_password_reset,
 )
 from agent.workflow_memory import WorkflowMemory
 
@@ -133,6 +134,23 @@ class Planner:
                 )
                 logger.info("[PLANNER] → %s (%s)", decision.action, decision.reason)
                 return decision
+
+        # ── 3b. Deterministic intent breaking (Overrides active loops) ─────────
+        if is_password_reset(user_text) and conversation.pending_action != "password_reset_waiting":
+            # Clear existing memory context so old IT workflows don't leak
+            memory = WorkflowMemory()
+            memory.set("problem", user_text)
+            
+            decision = PlannerDecision(
+                action="tool_loop",
+                reason="User explicitly requested password reset",
+                tool_name="password_reset",
+                memory=memory,
+            )
+            # Clear conversation original problem so it picks up the new text
+            conversation.original_problem = user_text
+            logger.info("[PLANNER] → %s (%s)", decision.action, decision.reason)
+            return decision
 
         # ── 4. Active tool loop (IT troubleshooting or incident follow-up) ─────
         if conversation.pending_action in (

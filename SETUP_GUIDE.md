@@ -70,12 +70,24 @@ sudo systemctl enable postgresql
 
 ### Installing Prerequisites (Windows)
 
-- Python: https://www.python.org/downloads/
-- Node.js: https://nodejs.org/
-- PostgreSQL: https://www.postgresql.org/download/windows/
-- Git: https://git-scm.com/download/win
+On Windows 10 / 11, you can install everything directly via terminal using **`winget`** (Windows Package Manager, built-in):
 
-> ⚠️ On Windows, use **Git Bash** or **WSL2** (Windows Subsystem for Linux) to run all shell commands below.
+```powershell
+# Run in PowerShell or Command Prompt (as Administrator):
+winget install Python.Python.3.11
+winget install OpenJS.NodeJS.LTS
+winget install PostgreSQL.PostgreSQL
+winget install Git.Git
+```
+
+> 💡 Alternatively, you can download GUI installers manually:
+> - Python: https://www.python.org/downloads/
+> - Node.js: https://nodejs.org/
+> - PostgreSQL: https://www.postgresql.org/download/windows/
+> - Git: https://git-scm.com/download/win
+
+> ⚠️ On Windows, use **Git Bash** or **WSL2** (Windows Subsystem for Linux) to run all project shell commands below.
+
 
 ---
 

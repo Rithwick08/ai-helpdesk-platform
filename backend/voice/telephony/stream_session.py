@@ -68,6 +68,8 @@ class StreamSession:
         UTC timestamp when stream stopped/closed.
     status : str
         Stream state ('connected', 'active', 'processing', 'speaking', 'stopped', 'closed').
+    dg_streamer : DeepgramStreamer | None
+        Deepgram streaming client.
     """
 
     def __init__(self, call_sid: str, stream_sid: str = ""):
@@ -80,10 +82,12 @@ class StreamSession:
         self.start_time: datetime = datetime.now(timezone.utc)
         self.end_time: Optional[datetime] = None
         self.status: str = "connected"
+        self.dg_streamer: Optional[DeepgramStreamer] = None
 
         # Audio accumulation buffer
         self._mulaw_buffer = bytearray()
         self.turns: list[StreamTurn] = []
+        self.barge_in_count: int = 0  # number of barge-ins in this session
 
         logger.info(
             "[STREAM_SESSION] Created | call_sid=%s | stream_sid=%s | session_id=%s",
@@ -172,6 +176,7 @@ class StreamSession:
             "packet_count": self.packet_count,
             "bytes_received": self.bytes_received,
             "turn_count": len(self.turns),
+            "barge_in_count": self.barge_in_count,
             "status": self.status,
             "start_time": self.start_time.isoformat(),
             "end_time": self.end_time.isoformat() if self.end_time else None,

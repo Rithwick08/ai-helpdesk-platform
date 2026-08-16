@@ -74,6 +74,9 @@ class CyberDeskAgent:
             return res
 
         if action == "tool_loop":
+            # Save the latest memory state (e.g. if planner cleared it for a new intent)
+            conversation.collected_entities = memory.to_json()
+            db.commit()
             # Already inside an active tool's troubleshooting loop
             res = CyberDeskAgent._execute_tool(
                 tool_name, request, conversation, current_user, db, ai_result or {}, perf=perf

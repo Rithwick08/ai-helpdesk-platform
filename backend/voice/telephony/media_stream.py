@@ -22,7 +22,7 @@ Base64 JSON media frames → Twilio WebSocket → Caller
 
 import logging
 import time
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
@@ -55,6 +55,8 @@ async def process_stream_utterance(
     mulaw_bytes: bytes,
     current_user: User,
     db: Session,
+    transcript: Optional[str] = None,
+    stt_ms: int = 0,
 ) -> Tuple[List[str], str, int, str]:
     """
     Process one accumulated audio utterance from Twilio Media Streams through the Voice Pipeline.
@@ -69,6 +71,10 @@ async def process_stream_utterance(
         Authenticated user (or default system user for phone calls).
     db : Session
         Active SQLAlchemy database session.
+    transcript : str | None
+        Optional transcript provided by streaming STT.
+    stt_ms : int
+        Optional STT processing time overhead (e.g. time spent waiting for final transcript).
 
     Returns
     -------
@@ -114,6 +120,8 @@ async def process_stream_utterance(
             current_user=current_user,
             db=db,
             conversation_id=session.conversation_id,
+            transcript=transcript,
+            stt_ms=stt_ms,
         )
         pipeline_ms = int((time.monotonic() - t_pipeline) * 1000)
     except Exception as exc:

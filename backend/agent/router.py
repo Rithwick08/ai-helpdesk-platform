@@ -39,7 +39,7 @@ class Router:
                 "action": decision.action,
                 "tool_name": decision.tool_name,
                 "llm_result": None
-            }, memory
+            }, decision.memory
 
         # 2. No active workflow — defer to Tool Selection LLM for intent classification
         ai_result = chat_with_ai(conversation_history, current_user, memory=memory)

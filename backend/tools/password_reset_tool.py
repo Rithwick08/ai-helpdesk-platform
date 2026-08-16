@@ -26,6 +26,10 @@ class PasswordResetTool:
         memory = WorkflowMemory(conversation.collected_entities)
         entities = ai_result.get("entities", {}) if ai_result else {}
 
+        # Restore pending_action so the planner keeps routing here
+        conversation.pending_action = "password_reset_waiting"
+        db.commit()
+
         # Resolve account_type from multiple sources (priority order)
         account_type = (
             entities.get("account_type")
@@ -34,6 +38,12 @@ class PasswordResetTool:
         )
 
         phase = memory.get("pr.phase")
+
+        # ── Collect account_type from follow-up message ───────────────────────
+        if phase == "collecting":
+            account_type = request.message.strip() or "company account"
+            memory.set("account_type", account_type)
+            memory.set("pr.phase", None)  # move out of collecting phase
 
         # ── Missing account_type: ask for it ──────────────────────────────────
         if not account_type:
@@ -46,29 +56,20 @@ class PasswordResetTool:
                 "• Windows Login\n• VPN\n• Microsoft 365\n• Email\n• Other",
                 memory
             )
-
-        # ── Collect account_type from follow-up message ───────────────────────
-        if phase == "collecting":
-            account_type = request.message.strip() or "company account"
-            memory.set("account_type", account_type)
-            # Proceed to confirmation below
         
         # ── Handle Confirmation Phase ──────────────────────────────────────────
         if phase == "awaiting_confirmation":
-            msg = request.message.strip().lower()
+            msg = request.message.strip()
             
-            # Note: Planner might have already classified this, but we parse here 
-            # to fulfill the internal confirmation contract.
-            confirm_words = ["yes", "yes.", "yes please", "sure", "okay", "proceed"]
-            cancel_words = ["no", "cancel", "stop", "never mind"]
+            from agent.states import is_confirmation, is_cancellation
             
-            if msg in cancel_words:
+            if is_cancellation(msg):
                 memory.set("pr.phase", None)
                 conversation.collected_entities = memory.to_json()
                 db.commit()
                 return {"status": "cancelled", "response": "Password reset cancelled."}
                 
-            if msg not in confirm_words:
+            if not is_confirmation(msg):
                 return {
                     "status": "waiting_confirmation",
                     "response": f"I didn't quite catch that. Shall I create a password reset request for your {account_type} account?"

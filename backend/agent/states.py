@@ -89,6 +89,13 @@ CONFIRM_PHRASES = [
     r"^that.?s (correct|fine|good)[.!?]*$",
 ]
 
+PASSWORD_RESET_PHRASES = [
+    r"\bforgot (my|the|a)?\s*password\b",
+    r"\breset (my|the|a)?\s*password\b",
+    r"\bpassword reset\b",
+    r"\bcan.?t remember (my|the|a)?\s*password\b",
+    r"\bneed a new password\b",
+]
 
 def _match_any(text: str, patterns: list) -> bool:
     lowered = text.lower().strip()
@@ -113,3 +120,6 @@ def is_cancellation(text: str) -> bool:
 
 def is_confirmation(text: str) -> bool:
     return _match_any(text, CONFIRM_PHRASES)
+
+def is_password_reset(text: str) -> bool:
+    return _match_any(text, PASSWORD_RESET_PHRASES)

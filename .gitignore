@@ -11,3 +11,24 @@ node_modules/
 
 # Mac
 .DS_Store
+
+# Databases
+*.db
+*.sqlite3
+
+# Logs
+*.log
+backend/backend_server.log
+backend/server_stdout.log
+backend/cloudflared.log
+
+# Audio Testing
+*.wav
+*.mulaw
+
+# Testing
+.pytest_cache/
+
+# Scratch & Temporary
+scratch/
+backend/scratch/
