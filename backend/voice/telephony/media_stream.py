@@ -57,6 +57,7 @@ async def process_stream_utterance(
     db: Session,
     transcript: Optional[str] = None,
     stt_ms: int = 0,
+    voice_metrics: Optional[dict] = None,
 ) -> Tuple[List[str], str, int, str]:
     """
     Process one accumulated audio utterance from Twilio Media Streams through the Voice Pipeline.
@@ -159,6 +160,7 @@ async def process_stream_utterance(
         response_text=pipeline_result.response_text,
         agent_status=pipeline_result.agent_status,
         audio_bytes_sent=len(sarvam_mulaw_bytes),
+        voice_metrics=voice_metrics,
     )
 
     return (

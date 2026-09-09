@@ -33,6 +33,7 @@ class StreamTurn:
     stt_latency_ms: Optional[int] = None
     ai_latency_ms: Optional[int] = None
     tts_latency_ms: Optional[int] = None
+    voice_metrics: Optional[dict] = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
@@ -127,6 +128,7 @@ class StreamSession:
         stt_latency_ms: Optional[int] = None,
         ai_latency_ms: Optional[int] = None,
         tts_latency_ms: Optional[int] = None,
+        voice_metrics: Optional[dict] = None,
     ) -> StreamTurn:
         """Record turn latency metrics."""
         turn = StreamTurn(
@@ -138,7 +140,14 @@ class StreamSession:
             stt_latency_ms=stt_latency_ms,
             ai_latency_ms=ai_latency_ms,
             tts_latency_ms=tts_latency_ms,
+            voice_metrics=voice_metrics,
         )
+        
+        # Log the metrics if available
+        if voice_metrics:
+            metrics_str = " ".join(f"{k}={v}" for k, v in voice_metrics.items())
+            logger.info("[VOICE_METRICS] %s", metrics_str)
+            
         self.turns.append(turn)
         self.status = agent_status
 

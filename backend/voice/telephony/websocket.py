@@ -107,6 +107,7 @@ async def _stream_tts_frames(
         session.call_sid,
     )
 
+    start_time = time.monotonic()
     for i, frame in enumerate(b64_frames):
         # Check for barge-in before every frame
         if barge_in_event.is_set():
@@ -141,8 +142,17 @@ async def _stream_tts_frames(
             logger.warning("[TELEPHONY/TTS] Failed to send frame %d: %s", i, exc)
             return False
 
-        # 18ms pacing to match real-time mu-law playback
-        await asyncio.sleep(0.018)
+        # Elapsed-time pacing to prevent Twilio buffer underruns
+        # We want to stay roughly 400ms ahead of real-time playback
+        expected_elapsed = (i * 0.020)
+        actual_elapsed = time.monotonic() - start_time
+        
+        if expected_elapsed - actual_elapsed > 0.4:
+            # We are more than 400ms ahead of Twilio playback, pace ourselves
+            await asyncio.sleep(0.01)
+        else:
+            # Yield to event loop briefly so we don't block other async tasks
+            await asyncio.sleep(0)
 
     # Normal completion — send mark event
     try:
@@ -168,6 +178,7 @@ async def _process_and_respond(
     current_user: User,
     db: Session,
     barge_in_event: asyncio.Event,
+    voice_metrics: Optional[dict] = None,
 ) -> Optional[asyncio.Task]:
     """
     Extract buffered audio, process via Voice Pipeline (STT → AI → TTS),
@@ -214,6 +225,7 @@ async def _process_and_respond(
             db=db,
             transcript=transcript,
             stt_ms=stt_ms,
+            voice_metrics=voice_metrics,
         )
     except Exception as exc:
         logger.error("[TELEPHONY/WS] Failed to process stream utterance: %s", exc)
@@ -311,6 +323,7 @@ async def telephony_media_websocket(websocket: WebSocket):
                 barge_in_event.clear()
                 tts_task = None
                 barge_in_candidate_count = 0
+                voice_metrics = {}
 
                 logger.info(
                     "[TELEPHONY/WS] Stream started | call_sid=%s | stream_sid=%s",
@@ -389,6 +402,7 @@ async def telephony_media_websocket(websocket: WebSocket):
                                     )
                                     barge_in_event.set()
                                     session.status = "interrupted"
+                                    voice_metrics["barge_in_confirmed"] = int(time.monotonic() * 1000)
                                     if hasattr(session, "barge_in_count"):
                                         session.barge_in_count += 1
                         else:
@@ -399,6 +413,8 @@ async def telephony_media_websocket(websocket: WebSocket):
                     if rms > SPEECH_RMS_THRESHOLD:
                         if not has_speech:
                             logger.info("[TELEPHONY/VAD] 🗣️ Speech STARTED detected | RMS=%d", rms)
+                            if session.status == "interrupted":
+                                voice_metrics["capture_start"] = int(time.monotonic() * 1000)
                         has_speech = True
                         last_speech_time = now
                     elif has_speech:
@@ -421,6 +437,8 @@ async def telephony_media_websocket(websocket: WebSocket):
                             barge_in_candidate_count = 0
 
                             if was_barge_in:
+                                voice_metrics["capture_end"] = int(time.monotonic() * 1000)
+                                voice_metrics["vad_wait_ms"] = int(silence_dur * 1000)
                                 logger.info(
                                     "[TELEPHONY/BARGE_IN] Capturing interrupted caller utterance | bytes=%d",
                                     session.buffered_bytes_count,
@@ -442,16 +460,16 @@ async def telephony_media_websocket(websocket: WebSocket):
                                 except (asyncio.TimeoutError, asyncio.CancelledError):
                                     pass
 
-                            async with processing_lock:
-                                tts_task = await _process_and_respond(
-                                    websocket, session, current_user, db, barge_in_event,
-                                )
-
-                            if was_barge_in:
                                 logger.info(
                                     "[TELEPHONY/BARGE_IN] Processing interrupted request | call_sid=%s",
                                     session.call_sid,
                                 )
+
+                            async with processing_lock:
+                                tts_task = await _process_and_respond(
+                                    websocket, session, current_user, db, barge_in_event, voice_metrics,
+                                )
+                                voice_metrics = {}
 
                             # Reset Deepgram for the next turn
                             try:

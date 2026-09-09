@@ -33,6 +33,7 @@ class DeepgramStreamer:
         self._listen_task: Optional[asyncio.Task] = None
         self._final_transcript = ""
         self._is_finished = False
+        self._speech_final_detected = False
         self._finished_event = asyncio.Event()
 
     async def start(self):
@@ -56,11 +57,18 @@ class DeepgramStreamer:
         self._final_transcript = ""
         self._interim_transcript = ""
         self._is_finished = False
+        self._speech_final_detected = False
         self._finished_event = asyncio.Event()
         
         def on_message(result):
             try:
                 t = result.channel.alternatives[0].transcript
+                
+                # Check for speech_final
+                if getattr(result, "speech_final", False):
+                    self._speech_final_detected = True
+                    logger.info("[STT_STREAM] Speech final detected")
+                    
                 if result.is_final:
                     if t:
                         self._final_transcript += (" " if self._final_transcript else "") + t.strip()
@@ -113,13 +121,31 @@ class DeepgramStreamer:
             except Exception as exc:
                 logger.warning("[STT_STREAM] Error sending finalize: %s", exc)
                 
-        # Wait up to 3 seconds for the final transcript to arrive from Deepgram
+        # Wait for the final transcript to arrive from Deepgram.
+        if self._speech_final_detected and self._final_transcript:
+            timeout_seconds = 0.2
+        elif self._final_transcript and not self._interim_transcript:
+            timeout_seconds = 0.5
+        elif self._interim_transcript:
+            timeout_seconds = 1.5
+        else:
+            timeout_seconds = 3.0
+            
+        logger.info(
+            "[STT_STREAM] finish() waiting %.1fs | current_final=%r | current_interim=%r", 
+            timeout_seconds, self._final_transcript, self._interim_transcript
+        )
+        
         try:
-            await asyncio.wait_for(self._finished_event.wait(), timeout=3.0)
+            await asyncio.wait_for(self._finished_event.wait(), timeout=timeout_seconds)
         except asyncio.TimeoutError:
-            logger.warning("[STT_STREAM] Timed out waiting for final Deepgram transcript")
+            if not (self._final_transcript + " " + self._interim_transcript).strip():
+                logger.warning("[STT_STREAM] Timed out waiting for final Deepgram transcript (empty)")
+            else:
+                logger.debug("[STT_STREAM] Proceeding with existing transcript (final event delayed)")
             
         final_result = (self._final_transcript + " " + self._interim_transcript).strip()
+        logger.info("[STT_STREAM] finish() returning final transcript=%r", final_result)
         
         async def _cleanup(socket, context):
             if socket:
