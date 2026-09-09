@@ -8,6 +8,10 @@ from models.it_ticket import ITTicket
 from models.ticket_history import TicketHistory
 from models.assistant_conversation import AssistantConversation
 from models.assistant_message import AssistantMessage
+from models.security_update import SecurityUpdate
+from models.training_progress import TrainingProgress
+from models.training_recommendation import TrainingRecommendation
+from models.training_video import TrainingVideo
 
 Base.metadata.create_all(bind=engine)
 
