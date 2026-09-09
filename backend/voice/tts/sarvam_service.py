@@ -217,7 +217,7 @@ async def generate_speech(
 
         response = await client.text_to_speech.convert(
             text=text,
-            target_language_code=effective_language,
+            language_code=effective_language,
             speaker=effective_speaker,
             model=effective_model,
             output_audio_codec=effective_codec,
