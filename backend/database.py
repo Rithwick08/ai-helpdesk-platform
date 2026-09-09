@@ -8,11 +8,16 @@ import os
 load_dotenv()
 
 Base = declarative_base()
-DATABASE_URL = (
-    f"postgresql://{os.getenv('DB_USER')}:"
-    f"{os.getenv('DB_PASSWORD')}@localhost/"
-    f"{os.getenv('DB_NAME')}"
-)
+_raw_url = os.getenv("DATABASE_URL")
+if _raw_url:
+    # Render supplies postgres:// which SQLAlchemy requires as postgresql://
+    DATABASE_URL = _raw_url.replace("postgres://", "postgresql://", 1)
+else:
+    DATABASE_URL = (
+        f"postgresql://{os.getenv('DB_USER')}:"
+        f"{os.getenv('DB_PASSWORD')}@localhost/"
+        f"{os.getenv('DB_NAME')}"
+    )
 
 engine = create_engine(DATABASE_URL)
 
