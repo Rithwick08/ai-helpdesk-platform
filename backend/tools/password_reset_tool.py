@@ -41,7 +41,29 @@ class PasswordResetTool:
 
         # ── Collect account_type from follow-up message ───────────────────────
         if phase == "collecting":
-            account_type = request.message.strip() or "company account"
+            msg = request.message.strip()
+            msg_lower = msg.lower()
+
+            if "vpn" in msg_lower:
+                account_type = "VPN"
+            elif "microsoft" in msg_lower or "365" in msg_lower:
+                account_type = "Microsoft 365"
+            elif "windows" in msg_lower:
+                account_type = "Windows Login"
+            elif "email" in msg_lower:
+                account_type = "Email"
+            elif "company portal" in msg_lower:
+                account_type = "Company Portal"
+            elif "azure" in msg_lower:
+                account_type = "Azure AD"
+            else:
+                account_type = msg or "company account"
+                # Preserve exact case if they typed a known category exactly
+                for known in KNOWN_ACCOUNT_TYPES:
+                    if known.lower() == msg_lower:
+                        account_type = known
+                        break
+
             memory.set("account_type", account_type)
             memory.set("pr.phase", None)  # move out of collecting phase
 

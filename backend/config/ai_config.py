@@ -1,8 +1,8 @@
-CHAT_MODEL = "llama-3.1-8b-instant"
+CHAT_MODEL = "groq/compound-mini"
 
-REASONING_MODEL = "llama-3.3-70b-versatile"
+REASONING_MODEL = "groq/compound"
 
-CLASSIFICATION_MODEL = "llama-3.1-8b-instant"
+CLASSIFICATION_MODEL = "groq/compound-mini"
 
 TEMPERATURE = 0.2
 
