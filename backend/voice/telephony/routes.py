@@ -112,6 +112,9 @@ async def incoming_call_webhook(
 
     # ── 4. Construct Media Stream WebSocket URL ────────────────────────────────
     stream_url = _build_stream_url(request)
+    if caller_number:
+        from urllib.parse import urlencode
+        stream_url = f"{stream_url}?{urlencode({'caller_number': caller_number})}"
 
     # ── 5. Generate Media Stream TwiML ─────────────────────────────────────────
     try:

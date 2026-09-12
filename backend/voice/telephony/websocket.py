@@ -82,6 +82,35 @@ def _get_default_telephony_user(db: Session) -> User:
     return user
 
 
+def _find_user_by_phone(db: Session, caller_number: str) -> Optional[User]:
+    """Find a User by their phone number, attempting to normalize and match country codes."""
+    if not caller_number:
+        return None
+
+    # Try exact match first
+    user = db.query(User).filter(User.phone_number == caller_number).first()
+    if user:
+        return user
+
+    # Normalize by keeping only digits and '+'
+    normalized = "".join(c for c in caller_number if c.isdigit() or c == '+')
+    user = db.query(User).filter(User.phone_number == normalized).first()
+    if user:
+        return user
+
+    # Try matching the last 10 digits to handle country code differences safely
+    if len(normalized) >= 10:
+        last_10 = normalized[-10:]
+        # Get all users with phone numbers (usually a small set in this system)
+        users = db.query(User).filter(User.phone_number.isnot(None)).all()
+        for u in users:
+            u_norm = "".join(c for c in u.phone_number if c.isdigit() or c == '+')
+            if len(u_norm) >= 10 and u_norm[-10:] == last_10:
+                return u
+
+    return None
+
+
 async def _stream_tts_frames(
     websocket: WebSocket,
     session: StreamSession,
@@ -279,7 +308,15 @@ async def telephony_media_websocket(websocket: WebSocket):
     barge_in_candidate_count: int = 0              # consecutive above-threshold packets while speaking
 
     try:
-        current_user = _get_default_telephony_user(db)
+        caller_number = websocket.query_params.get("caller_number")
+        if caller_number:
+            current_user = _find_user_by_phone(db, caller_number)
+            if current_user:
+                logger.info("[TELEPHONY/WS] Identified caller %s as User %s (ID: %s)", caller_number, current_user.email, current_user.id)
+
+        if not current_user:
+            logger.info("[TELEPHONY/WS] Caller not identified or no caller_number provided, falling back to default user.")
+            current_user = _get_default_telephony_user(db)
 
         while True:
             try:
